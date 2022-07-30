@@ -1,0 +1,87 @@
+# An example of config file used to train tire curves
+# This file contains parameters for the neural network models for
+# the front and rear tire as well as parameters for the optimization process
+
+# The path for the dataset or the logs run for training the model
+train_data: tire_force_dataset.pkl
+
+# # Prefix of the output file (front or rear) will be added at the end
+# # of that file name to distinguish between a front or rear learned curve
+# output_file: nn_curve
+
+# Model parameters
+model:
+  # Number of observation
+  n_y: 1
+  # Number of control inputs
+  n_u: 1
+  # Specified if ts is fixed
+  fixed_ts: False
+  # Number of sampling for fixed initial cond and sequence of control
+  num_particles: 1
+  # Define the parameters for the SDE solver
+  sde_solver:
+    init_step: 0.01
+    max_steps: 2046
+    specific_sde: False
+    stepsize_controller:
+      name: ConstantStepSize
+      params:
+        compile_steps: null
+    adjoint:
+      name: RecursiveCheckpointAdjoint
+      # params:
+    solver:
+      name: ReversibleHeun
+      # params
+    # A value just below the time step for ConstantStepSize
+    # and RecursiveCheckpointAdjoint
+    brownian_tol: 0.01
+
+
+
+# Loss function parameters
+# Parameters to weight objective in the loss function
+loss:
+  kl: 1.0 # Importance of loss on the kl divergence
+  logprob: 1.0 # Importance on the weight of the logprob
+  noise: 0 # How important it is to maximize noise while fitting the data
+  horizon: 20 # Number of ahead steps for loss computation
+
+# Random number generator. It can be a single value or a list of value
+# if the training should be done under different neural network initialization
+seed: 0
+
+# Optimizer parameters
+optimizer:
+  - name: scale_by_adam
+    # params:
+    #   b1: 0.999
+    #   b2: 0.9999
+  # - name: add_decayed_weights
+  #   params:
+  #     weight_decay: 0.001
+  - name: exponential_decay
+    scheduler: True
+    params:
+      init_value: -0.1 # Initial learning rate (Negative value for minimization)
+      transition_steps: 100000 # Basically the maximum number of gradient steps
+      decay_rate: 0.001 # Typically (end_value / init_value) if end_value is expected at end
+  # - name: adaptive_grad_clip
+  #   params:
+  #     clipping: 0.001
+
+# Training parameters
+training:
+  train_batch: 256 # The mini batch size for the training dataset
+  test_batch: 256 # The mini batch size for the training dataset
+  nepochs: 500 # The number of epochs (full pass over the training dataset)
+  data_split_rate: 100 # The frequency (in terms of nepochs) at which the data is reshuffled
+  train_num_batch_eval: 15 # The number of batches when evaluating loss for display only
+  patience: 15 # The number of epochs after which to stop the learningif no improvement in solution
+  display_losses: True # Display the losses as the training evolves
+  no_improvement_bound: 0.001 # The bound to detect no improvement in the loss
+  test_freq: 50 # Number of gradient steps after which to evaluate and display losses
+  save_freq: 500 # Number of gradient steps after which to save the current losses+nn
+  ratio_test: 0.1 # The ratio number of data set used for evaluation test loss (only for printing)
+  ratio_train: 0.1 # The ratio number of data set used for evaluation train loss (only for printing)
