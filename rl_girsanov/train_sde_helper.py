@@ -300,9 +300,11 @@ def train_model(params, train_data, outfile, improvement_cond, sde_constr):
     for epoch in tqdm(range(trainer_params['nepochs'])):
         # Split the dataset into trajectory of fixed horizon
         if epoch % trainer_params['data_split_rate'] == 0:
+            tqdm.write('Splitting dataset into finite length trajectories...\n')
             splitted_train_data = split_dataset_into_finitehorizon_traj(train_data, m_numpy_rng, horizon_plan)
             splitted_train_data_eval = split_dataset_into_finitehorizon_traj(logging_train, m_numpy_rng, horizon_plan)
             splitted_test_data_eval = split_dataset_into_finitehorizon_traj(logging_test, m_numpy_rng, horizon_plan)
+            tqdm.write('End of splitting dataset into finite length trajectories...\n')
 
         # Shuffle the entire data set at each epoch and return iterables
         ds_train_c = shuffle_and_split(m_numpy_rng, splitted_train_data, train_batch_size, shuffle=True)
