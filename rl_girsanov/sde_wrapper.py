@@ -7,6 +7,11 @@ from jax.experimental.host_callback import id_print
 import diffrax
 import pickle
 
+# [TODO Franck] Incorporate piecewise constant for MuJoCo/Brax Env
+# [TODO Franck] Fixed ts should be improved for memory and computational efficiency
+# [TODO Franck] When loading from file upgrade models params from another dict arguments
+# [TODO Franck] Check problem dimension
+
 class LatentSDE(hk.Module):
     """Define a latent SDE object with latent variables representing the states
        of an SDE. In addition, this class should implement functions to estimate the
@@ -246,7 +251,7 @@ class LatentSDE(hk.Module):
             return jnp.zeros_like(x0)[None] # 2D array to be similar with sde_solve
         else:
             # Solve the sde and return its output (latent space)
-            return sde_solve(ts, x0, rng_brownian, drift_fn, diff_fn).ys
+            return sde_solve(ts, x0, rng_brownian, drift_fn, diff_fn)
 
     def sample_for_loss_computation(self, ts, meas_y, uVal, rng):
         """Summary
@@ -301,6 +306,52 @@ class LatentSDE(hk.Module):
 
         return plogVal, kl_div, extra
 
+    def sample_dynamics_with_cost(self, ts, y, u, rng, cost_fn, slack=None):
+        """Generate a function that integrate the sde dynamics augmented with a cost
+           function evolution (which is also integrated along the dynamics)
+
+        Args:
+            ts (TYPE): The time indexes at which the integration happens
+            y (TYPE): The current observation of the system
+            u (TYPE): The sequence of control to applied at each time step
+            rng (TYPE): A random key generator for Brownian noise
+            cost_fn (TYPE): The cost function to integrate
+                            cost_fn : (_x, _u, _slack)
+            slack (None, optional): Slack variable that are used in the cost function
+                                    They are extrapolated similarly to the control inputs
+                                    before integration
+
+        Raises:
+            The state at the last time Ts and
+        """
+        # If slack variables are given extrapolate it over the time horizon
+        assert slack is None or (slack.ndim == 2 and slack.shape[0] == ts.shape[0]), \
+                'Slack dimension and the time horizon should match for interpolation'
+        slack_fun = lambda t : None if slack is None else linear_interpolation(t, ts, slack)
+
+        # Define the augmented dynamics
+        def cost_aug_drift(_t, _aug_x, _u):
+            _x = _aug_x[:-1]
+            drift_pos_x = self.posterior_drift(_t, _x, _u)
+            slack_t = slack_fun(_t)
+            # [TODO Franck] Maybe add time dependency ?
+            cost_term = cost_fn(_x, _u, slack_t)
+            return jnp.concatenate((drift_pos_x, jnp.array([cost_term])))
+
+        def cost_aug_diff(_t, _aug_x):
+            _x = _aug_x[:-1]
+            diff_x = self.prior_diffusion(_t, _x)
+            return jnp.concatenate((diff_x, jnp.array([0.])))
+
+        # Now convert the observation to a state and then integrate it
+        rng_obs2state, rng_brownian = jax.random.split(rng, 2)
+        x =  self.obs2state(y, rng_obs2state)
+
+        # Solve the augmented integration problem
+        aug_x = jnp.concatenate((x, jnp.array([0.])) )
+        est_x = self.sample_general(cost_aug_drift, cost_aug_diff, ts, aug_x, u, rng_brownian)
+        return est_x
+
 
 def create_sampling_fn(params_model, sde_constr= LatentSDE, prior_sampling=True, seed=0):
     """Create a sampling function for prior or posterior distribution
@@ -337,7 +388,7 @@ def create_sampling_fn(params_model, sde_constr= LatentSDE, prior_sampling=True,
 
     return nn_params, multi_sampling
 
-def create_loss_fn(params_model, params_loss, sde_constr= LatentSDE, seed=0):
+def create_loss_fn(params_model, params_loss, sde_constr=LatentSDE, seed=0):
     """Create a sampling function for prior or posterior distribution
 
     Args:
@@ -412,6 +463,188 @@ def create_loss_fn(params_model, params_loss, sde_constr= LatentSDE, seed=0):
         return total_sum, {'logprob' : loss_logprob, 'kl' : loss_kl_div, **m_res}
 
     return nn_params, loss_fn
+
+def create_cost_sampling_fn(params_model, cost_fn,
+                            terminal_cost=None,
+                            sde_constr= LatentSDE,
+                            seed=0):
+    """Create a sampling function for the posterior combined with a loss function
+
+    Args:
+        params_model (TYPE): The SDE solver parameters and model parameters
+        sde_constr (TYPE): A class constructor that is child of LatentSDE class
+        seed (int, optional): A value to initialize the parameters of the model
+
+    Returns:
+        TYPE: Description
+    """
+    # Random ky for initialization
+    rng_zero = jax.random.PRNGKey(seed)
+
+    # Initialization of the observation and uzero
+    yzero = jnp.ones((params_model['n_y'],))
+    uzero = jnp.ones((2,params_model['n_u']))
+    tzero = jnp.array([0., 0.001])
+
+    # Number of control inputs
+    n_u = params_model['n_u']
+
+    # Save the number of samples
+    num_sample = params_model['num_particles']
+
+    # Check if some bounds on u are present
+    has_ubound = 'input_constr' in params_model
+    if has_ubound:
+        print('Found input bound constraints...\n')
+        input_lb = [-jnp.inf for _ in range(n_u)]
+        input_ub =[jnp.inf for _ in range(n_u)]
+        input_dict = params_model['input_constr']
+        assert len(input_dict['input_id']) <= n_u and \
+                len(input_dict['input_id']) == len(input_dict['input_bound']),\
+                "The number of constrained inputs identifier does not match the number of bounds"
+        for idx, (u_lb, u_ub) in zip(input_dict['input_id'], input_dict['input_bound']):
+            input_lb[idx], input_ub[idx] = u_lb, u_ub
+        input_lb = jnp.array(input_lb)
+        input_ub = jnp.array(input_ub)
+
+    # Check if bounds on the state are present
+    has_xbound = 'state_constr' in params_model
+    # By default we impose bounds constraint on the states using nonsmooth penalization
+    slack_proximal = False
+    if has_xbound:
+        print('Found states bound constraints...\n')
+        slack_dict = params_model['state_constr']
+        assert len(slack_dict['state_id']) <= params_model['n_x'] and \
+                len(slack_dict['state_id']) == len(slack_dict['state_bound']),\
+                'The number of the constrained states identifier does not match the number of bounds'
+        state_idx = jnp.array(slack_dict['state_id'])
+        slack_proximal = slack_dict['slack_proximal']
+        penalty_coeff = slack_dict['state_penalty']
+        state_lb = jnp.array([x[0] for x in slack_dict['state_bound']])
+        state_ub = jnp.array([x[1] for x in slack_dict['state_bound']])
+
+    def constr_cost_noprox(x_true, slack_x=None):
+        """ Penalty method with nonsmooth cost fuction
+        """
+        x = x_true[state_idx]
+        # diff_x should always be less than 0
+        diff_x = jnp.concatenate((x - state_ub, state_lb - x))
+        #[TODO Franck] Maybe sum the error instead of doing a mean over states
+        return jnp.sum(jnp.where( diff_x > 0, 1., 0.) * jnp.square(diff_x))
+
+    def constr_cost_withprox(x_true, slack_x):
+        """ With proximal constraint on the slack variable -> smooth norm 2 regularization
+        """
+        return jnp.sum(jnp.square(x_true[state_idx]-slack_x))
+
+    # A function to constraint a vector between a given minimum and maximum values
+    constr_vect = lambda a, a_lb, a_ub:  jnp.maximum(jnp.minimum(a, a_lb), a_ub)
+
+    # Now ready to define the constraint cost as well as the proximal operator if needed
+    constr_cost = None
+    proximal_fn = None
+
+    # Check if the problem has a state as slack variables
+    has_slack = has_xbound and slack_proximal
+    opt_params_size = n_u  + ( len(state_idx) if has_slack else 0)
+
+    # In case bound on u are given but no bound on x -> No constraint cost
+    # We known that the parameters of the opt is only based on control
+    # So we constraint such parameters as lowered by input_lb and uppered by input_ub
+    if has_ubound and (not has_xbound):
+        proximal_fn = lambda u_slack: constr_vect(u_slack, input_lb, input_ub)
+
+    # No bound on u are given but x is constrained and we are using proximal operator
+    # To constrain the slack variable associated with these states
+    if (not has_ubound) and has_xbound and slack_proximal:
+        constr_cost = constr_cost_withprox
+        proximal_fn = lambda u_slack: jnp.concatenate((u_slack[:n_u], constr_vect(u_slack[n_u:], state_lb, state_ub)))
+
+    # No bound on u is given but x is constrained. However, no slack variables
+    # for proximal computation is given -> Nonsmooth penalization
+    # IN this case, there is not proximal operator
+    if (not has_ubound) and has_xbound and (not slack_proximal):
+        constr_cost = constr_cost_noprox
+
+    # We have a bound on u and bounds on x, but the bounds on x are enforced
+    # as nonsmooth soft penalty cost
+    if has_ubound and has_xbound and (not slack_proximal):
+        constr_cost = constr_cost_noprox
+        proximal_fn = lambda u_slack: constr_vect(u_slack, input_lb, input_ub)
+
+    if has_ubound and has_xbound and slack_proximal:
+        constr_cost = constr_cost_withprox
+        u_slack_lb = jnp.concatenate((input_lb, state_lb))
+        u_slack_ub = jnp.concatenate((input_ub, state_ub))
+        proximal_fn = lambda u_slack: constr_vect(u_slack, u_slack_lb, u_slack_ub)
+
+    # Define the augmented cost with the penalization term
+    def aug_cost_fn(_x, _u, _slack, final_cost=False):
+        # Compute the actual cost
+        if final_cost:
+            actual_cost = 0. if terminal_cost is None else terminal_cost(_x)
+        else:
+            actual_cost = cost_fn(_x, _u)
+        if constr_cost is None:
+            return actual_cost
+        # Compute the constraints cost
+        pen_cost = constr_cost(_x, _slack)
+        return actual_cost + penalty_coeff * pen_cost
+
+    # Define the function to integrate the cost function and the dynamics
+    def sample_sde(t, y, opt_params, rng):
+        # Do some check
+        assert opt_params.ndim == 2, 'The parameters must be a two dimension array'
+        print(opt_params_size, opt_params)
+        if has_slack:
+            assert opt_params.shape[1] == opt_params_size, 'Shape of the opt params do not match'
+        else:
+            assert opt_params.shape[1] == n_u, 'Shape of the opt params do not match'
+        assert t.shape[0] == opt_params.shape[0], 'Time step should match the parameter size'
+        # Separate the parameters into slack variable and control variable
+        u_val, slack = (opt_params[:, :n_u], opt_params[:,n_u:]) if has_slack else (opt_params, None)
+        # Build the SDE solver
+        m_model = sde_constr(params_model)
+        # Compute the evolution of the state
+        x_evol = m_model.sample_dynamics_with_cost(t, y, u_val, rng, aug_cost_fn, slack)
+        # Evaluate the cost_to_go function
+        end_cost = aug_cost_fn(x_evol[-1,:-1], None,
+                                slack[-1] if slack is not None else slack,
+                                final_cost=True)
+        # Compute the total cost by adding the terminal cost
+        total_cost = end_cost + x_evol[-1,-1]
+        return total_cost, x_evol[:,:-1]
+
+    # Initialize an optimization parameters given a sequence of STATE x and u
+    # [TODO Fanck] Define it in terms of observation and use the state to observation
+    # transformation to match the output
+    # However the call of this with an observation will only happen once
+    def construct_opt_params(x, u):
+        if not has_slack:
+            return u
+        zero_x = jnp.zeros((u.shape[0],len(state_idx),))
+        return jnp.concatenate((u, x[:,state_idx]), axis=1) if x is not None \
+                else jnp.concatenate((u, zero_x), axis=1)
+
+
+    # Transform the function into a pure one
+    sampling_pure =  hk.without_apply_rng(hk.transform(sample_sde))
+    nn_params = sampling_pure.init(rng_zero, tzero, yzero,
+                                    construct_opt_params(None, uzero),
+                                    rng_zero)
+
+    # Now define the n_sampling method
+    def multi_sampling(_nn_params, t, y, opt_params, rng):
+        assert rng.ndim == 1, 'RNG must be a single key for vmapping'
+        m_rng = jax.random.split(rng, num_sample)
+        vmap_sampling = jax.vmap(sampling_pure.apply, in_axes=(None, None, None, None, 0))
+        total_loss, xtraj = vmap_sampling(_nn_params, t, y, opt_params, m_rng)
+        return jnp.mean(total_loss), xtraj
+
+    # Properly define the proximal_function
+    vmapped_prox = None if proximal_fn is None else jax.vmap(proximal_fn)
+    return nn_params, multi_sampling, vmapped_prox, constr_cost, construct_opt_params
+
 
 def load_model_from_file(file_dir, sde_constr, seed=0, num_particles=None):
     """ Load and return the learned weight parameters, and
@@ -551,7 +784,7 @@ def differentiable_sde_solver(params_solver={}):
         return diffrax.diffeqsolve(solv_term, solver, t0=ts[0], t1=ts[-1],
                     dt0=dt0, y0=z0, saveat=saveat,
                     stepsize_controller=stepsize_controller,
-                    adjoint=adjoint, max_steps=max_steps)
+                    adjoint=adjoint, max_steps=max_steps).ys
 
     return sde_solve
 
@@ -576,3 +809,25 @@ def linear_interpolation(x, xp, fp):
     f = jnp.where(x > xp[-1], fp[-1], f)
 
     return f
+
+def heun_strat_solver(ts, z0, rng_brownian, drift_fn, diffusion_fn):
+    # Build the brownian motion for this integration
+    # [TODO Franck] Maybe create it in one go instead of every call
+    dw = jax.random.normal(key=rng_brownian, shape=(ts.shape[0]-1, z0.shape[0]))
+    # Define the body loop
+    def heun_step(cur_y, dnoise):
+        _t, _y = cur_y
+        _next_t, _dw = dnoise
+        _dt = _next_t - _t
+        drift_t = drift_fn(_t, _y)
+        diff_t = diffusion_fn(_t, _y)
+        sqr_dt = jnp.sqrt(_dt) * _dw
+        _ybar = _y + drift_t * _dt + diff_t * sqr_dt
+        _drift_t = drift_fn(_next_t, _ybar)
+        _diff_t = diffusion_fn(_next_t, _ybar)
+        _ynext = _y + 0.5 * (drift_t + _drift_t) * _dt + 0.5 * (diff_t + _diff_t) * sqr_dt
+        return (_next_t, _ynext), _ynext
+    carry_init = (ts[0], z0)
+    xs = (ts[1:], dw)
+    _, yevol = jax.lax.scan(heun_step, carry_init, xs)
+    return jnp.concatenate((z0[None], yevol))

@@ -12,20 +12,19 @@ class MySDE(LatentSDE):
         super().__init__(params, name)
 
     def prior_drift(self, t, x, u):
-        return 3*x + u
-        # return jnp.zeros_like(x)
+        return jnp.zeros_like(x)
 
     def prior_diffusion(self, t, x):
         prior_nn = hk.get_parameter("diff", shape=(1,),
                             init=hk.initializers.RandomUniform(minval=-1e-2,maxval=1e-2))
-        return jnp.array([4.]) # * jnp.exp(prior_nn)
+        return jnp.array([8.]) # * jnp.exp(prior_nn)
 
     def posterior_drift(self, t, x, u):
         f = hk.nets.MLP(output_sizes=(4,1),
-                            w_init=hk.initializers.RandomUniform(minval=-1e-1, maxval=1e-1),
+                            w_init=hk.initializers.RandomUniform(minval=-1e-3, maxval=1e-3),
                             b_init=jnp.zeros, activation=jnp.tanh, name='f')
         G = hk.nets.MLP(output_sizes=(4,1),
-                            w_init=hk.initializers.RandomUniform(minval=-1e-1, maxval=1e-1),
+                            w_init=hk.initializers.RandomUniform(minval=-1e-3, maxval=1e-3),
                             b_init=jnp.zeros, activation=jnp.tanh, name='G')
         return f(x) + G(x) * u
         # return self.prior_drift(t, x, u)
@@ -130,9 +129,10 @@ no_improv = m_config['training']['no_improvement_bound']
 improved_est = lambda curr_opt, test_opt, train_opt: \
                     curr_opt['Total Loss'] > test_opt['Total Loss'] + no_improv
 
-train_model(m_config, dataset, 'outfile', improved_est, MySDE)
+# train_model(m_config, dataset, 'outfile', improved_est, MySDE)
 
 from sde_wrapper import load_model_from_file
+# num_particles = 1
 num_particles = 100
 _prior_fn, _posterior_fn, extra = load_model_from_file('outfile.pkl', MySDE, 0, num_particles)
 jit_prior_fn, jit_posterior_fn = jax.jit(_prior_fn), jax.jit(_posterior_fn)
@@ -143,6 +143,7 @@ tevol, y0, uevol = dataset['t'][1,:], dataset['y'][1,0,:], dataset['u'][1,:,:]
 
 ys_prior = jit_prior_fn(tevol, y0, uevol, m_rng)
 ys_posterior = jit_posterior_fn(tevol, y0, uevol, m_rng)
+# ys_posterior = jax.vmap(jit_posterior_fn)(dataset['t'], dataset['y'], dataset['u'], jax.random.split(m_rng, dataset['t'].shape[0]))
 # ys_prior = jit_prior_fn(tevol, y0, m_rng)
 # ys_posterior = jit_posterior_fn(tevol, y0, m_rng)
 
@@ -151,18 +152,19 @@ params_model = {'sde_solver' : sde_solver, 'n_y' : 1, 'n_u' : 1, 'fixed_ts' : Fa
                 'num_particles' : num_particles}
 prior_params, sampling_fn = create_sampling_fn(params_model, sde_constr=KnownSDE,
                     prior_sampling=True, seed=0)
-ys_true = jax.jit(sampling_fn)(prior_params, tevol, y0, uevol, o_rng)
+ys_true = jax.jit(sampling_fn)(prior_params, tevol, y0, uevol, m_rng)
 # ys_true = jax.jit(lambda p,t,y,r : sampling_fn(p,t,y,u_opt,r))(prior_params, tevol, y0, m_rng)
 print(extra)
 
 
 import matplotlib.pyplot as plt
-# for i in range(200):
-#     plt.plot(dataset['t'][i,:20], dataset['y'][i,:20,0], color='black')
+# for i in range(1000):
+#     plt.plot(dataset['t'][i,:80], dataset['y'][i,:80,0], color='black')
+#     plt.plot(dataset['t'][i,:80], ys_posterior[i,0,:80,0], color='green')
 for i in range(num_particles):
-    plt.plot(tevol[:80], ys_true[i,:80,0], color='red')
-    # plt.plot(tevol[:20], ys_prior[i,:20,0], color='blue')
-    plt.plot(tevol[:80], ys_posterior[i,:80,0], color='green')
+    plt.plot(tevol[:40], ys_true[i,:40,0], color='red')
+    # plt.plot(tevol[:80], ys_prior[i,:80,0], color='blue')
+    plt.plot(tevol[:40], ys_posterior[i,:40,0], color='green')
 
 plt.show()
 
