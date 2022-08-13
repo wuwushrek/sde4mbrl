@@ -1,13 +1,7 @@
 # An example of config file used to train tire curves
-# This file contains parameters for the neural network models for
-# the front and rear tire as well as parameters for the optimization process
 
 # The path for the dataset or the logs run for training the model
 # train_data: tire_force_dataset.pkl
-
-# # Prefix of the output file (front or rear) will be added at the end
-# # of that file name to distinguish between a front or rear learned curve
-# output_file: nn_curve
 
 # Model parameters
 model:
@@ -36,35 +30,23 @@ model:
   # input_constr:
   #   input_id: [0]
   #   input_bound: [[-1, 1]]
-  # Specified if ts is fixed
-  fixed_ts: False
-  # Number of sampling for fixed initial cond and sequence of control
-  num_particles: 1000
+  # Number of particles when sampling posterior or prior distribution
+  num_particles: 100
+  # Number of particles when sampling combined posterior and cost function
+  num_particles_online_control: 1000
+  # Number of particles when fitting the SDE
+  num_particles_learning_sde: 100
+  # Number of particles when fitting the SDE
+  num_particles_valuefun_learning: 100
   # Define the parameters for the SDE solver
-  sde_solver:
-    init_step: 0.01
-    max_steps: 2046
-    specific_sde: False
-    stepsize_controller:
-      name: ConstantStepSize
-      params:
-        compile_steps: null
-    adjoint:
-      name: RecursiveCheckpointAdjoint
-      # params:
-    solver:
-      name: ReversibleHeun
-      # params
-    # A value just below the time step for ConstantStepSize
-    # and RecursiveCheckpointAdjoint
-    brownian_tol: 0.01
+  sde_solver: 'stratonovich_milstein'
 
 apg_mpc:
   # The intial step size in case no linsearh arguments are provided
-  stepsize: 0.1
+  stepsize: 10.
 
   # The maximum number of gradient updates
-  max_iter: 1
+  max_iter: 10
 
   # The adaptive coefficient to scale the momentum. nill values mean
   # that it is not used and rather beta_k = k /(k+3) is used as classical acceleration momentum
@@ -75,10 +57,10 @@ apg_mpc:
   beta_init: 0.25
 
   # The stopping criteria of the algorithm based on gradient norm
-  tol: 1.0e-4
+  tol: 1.0e-3
 
   linesearch:
-    max_stepsize: 0.5 # The maximum admissible step size
+    max_stepsize: 10. # The maximum admissible step size
     coef: 0.1 # The agressiveness coefficient. The smaller the larger step size in the optimization
     decrease_factor: 0.4 # The decrease factor when performing the armijo linesearch
     increase_factor: 1.2 # The increase factor at each new gradient descent iteration
@@ -97,7 +79,7 @@ loss:
   kl: 1.0 # Importance of loss on the kl divergence
   logprob: 1.0 # Importance on the weight of the logprob
   noise: 0 # How important it is to maximize noise while fitting the data
-  horizon: 10 # Number of ahead steps for loss computation
+  horizon: 20 # Number of ahead steps for loss computation
 
 # Random number generator. It can be a single value or a list of value
 # if the training should be done under different neural network initialization
@@ -128,11 +110,9 @@ training:
   test_batch: 128 # The mini batch size for the training dataset
   nepochs: 500 # The number of epochs (full pass over the training dataset)
   data_split_rate: 100 # The frequency (in terms of nepochs) at which the data is reshuffled
-  train_num_batch_eval: 15 # The number of batches when evaluating loss for display only
   patience: 15 # The number of epochs after which to stop the learningif no improvement in solution
   display_losses: True # Display the losses as the training evolves
   no_improvement_bound: 0.001 # The bound to detect no improvement in the loss
   test_freq: 50 # Number of gradient steps after which to evaluate and display losses
   save_freq: 500 # Number of gradient steps after which to save the current losses+nn
   ratio_test: 0.1 # The ratio number of data set used for evaluation test loss (only for printing)
-  ratio_train: 0.1 # The ratio number of data set used for evaluation train loss (only for printing)

@@ -10,7 +10,8 @@ from typing import NamedTuple
 # A Function to estimate the suboptimality error
 opt_stop_criteria = lambda grad_val: jnp.sum(jnp.square(grad_val))
 
-def init_apg(x0, cost_fn, optimizer_params, proximal_fn=None):
+def init_apg(x0, cost_fn, optimizer_params, proximal_fn=None,
+             momentum=None, stepsize=None):
     """Initialize the APG algorithm
     This function will evaluate the cost function at x0 and its gradient
     It is better to use it in a function that is going to be jit-compiled
@@ -41,14 +42,24 @@ def init_apg(x0, cost_fn, optimizer_params, proximal_fn=None):
     cost_x0, grad_x0 = jax.value_and_grad(cost_fn)(x0)
     grad_x0_nsqr = opt_stop_criteria(grad_x0)
 
+    if momentum is None:
+        momentum = optimizer_params.get('beta_init', jnp.array(0.25))
+
+    if stepsize is None:
+        stepsize = init_step_size
+
+    avg_stepsize = stepsize
+
     opt_state_init = APGState(num_steps = jnp.array(1),
-                    momentum = optimizer_params.get('beta_init', jnp.array(0.25)),
+                    momentum = momentum,
+                    avg_momentum = momentum,
                     # num_linesearch = jnp.array(1),
                     avg_linesearch = jnp.array(1.),
-                    stepsize = init_step_size,
-                    avg_stepsize = init_step_size, # This can be used to warm-up online next mpc calls
+                    stepsize = stepsize,
+                    avg_stepsize = avg_stepsize, # This can be used to warm-up online next mpc calls
                     # init_cost = jnp.abs(cost_x0), # This is used as a scale for terminaison criterion
                     opt_cost = cost_x0,
+                    init_cost = cost_x0,
                     grad_sqr = grad_x0_nsqr,
                     not_done = jnp.array(True),
                     xk = x0,
@@ -172,14 +183,17 @@ def apg(optim_state, cost_fn, optimizer_params, proximal_fn=None):
         # Construct the new states of the optimizer
         num_total_step = opt_state.num_steps + 1
         avg_linesearch = (opt_state.num_steps * opt_state.avg_linesearch + linesearch_numstep)/num_total_step
-        avg_stepsize = (opt_state.num_steps * opt_state.stepsize + stepsize)/num_total_step
+        avg_stepsize = (opt_state.num_steps * opt_state.avg_stepsize + stepsize)/num_total_step
+        avg_momentum = (opt_state.num_steps * opt_state.avg_momentum + moment_next)/num_total_step
         opt_state_next = APGState(num_steps = num_total_step,
                                   momentum = moment_next,
+                                  avg_momentum = avg_momentum,
                                   avg_linesearch = avg_linesearch,
                                   # num_linesearch = linesearch_numstep,
                                   stepsize = stepsize,
                                   avg_stepsize = avg_stepsize,
                                   opt_cost = cost_ynext,
+                                  init_cost = opt_state.init_cost,
                                   # init_cost = opt_state.init_cost,
                                   grad_sqr = grad_ynext_nsqr,
                                   not_done = stop_not_sat,
@@ -211,11 +225,13 @@ class APGState(NamedTuple):
     """
     num_steps: int
     momentum: float
+    avg_momentum: float
     avg_linesearch: float
     # num_linesearch: int
     avg_stepsize: float
     stepsize: float
     opt_cost: float
+    init_cost: float
     # init_cost: float
     grad_sqr: float
     not_done: bool

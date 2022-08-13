@@ -2,31 +2,30 @@ import jax
 import jax.numpy as jnp
 import haiku as hk
 
-from jax.experimental.host_callback import id_print
+from sde4mbrl.sde_solver import sde_solver_name
+from sde4mbrl.utils import initialize_problem_constraints
 
-import diffrax
-import pickle
+# [TODO] Batching over t for loss computationwith fixed time step
 
-# [TODO Franck] Incorporate piecewise constant for MuJoCo/Brax Env
-# [TODO Franck] Fixed ts should be improved for memory and computational efficiency
-# [TODO Franck] When loading from file upgrade models params from another dict arguments
-# [TODO Franck] Check problem dimension
+class ControlledSDE(hk.Module):
+    """Define an SDE object (stochastic dynamical system) with latent variable
+       and which is controlled via a control input.
+       Typically \dot{x} = (f(t,x) + G(t,x) u) dt + sigma(t,x) dW, where the noise
+       is considered as a stratonovich noise (HJB theory doesn't change much)
 
-class LatentSDE(hk.Module):
-    """Define a latent SDE object with latent variables representing the states
-       of an SDE. In addition, this class should implement functions to estimate the
-       the latent space from observation either in a probabilistic or deterministic
-       manner.
+       This class implements several functions to facilitate (a) Train an SDE to fit data
+       given a prior as another SDE; (b) Train a cost-to-go/Value function as well as the sde
+       for online control in real-time.
 
-       This class implements several function to train an SDE to fit data
-       given a prior as another SDE. A user should create a class that inherits
-       properties of this class while redefining the functions below:
+       A user should create a class that inherits the properties of this class
+       while redefining the functions below:
             - prior_diffusion : Define the prior diffusion function (can be parameterized by NN)
             - prior_drift : Define the prior drift function (can be parameterized by NN)
             - posterior_drift : Define the posterior drift function (can be parameterized)
+            - (or prior_error and posterior_is_prior_plus_error) if the posterior is prior + an error function
             - init_encoder : Initialize the encoder function -> Provide a way to go from observation to state and its log probability
     """
-    def __init__(self, params={}, name=None):
+    def __init__(self, params, name=None):
         """Initialize the parameterized sde prior and posterior dynamics
 
         Args:
@@ -39,6 +38,10 @@ class LatentSDE(hk.Module):
         # Need to be done for haiku initialization module
         super().__init__(name=name)
 
+        # Some check to ensure the right parameters are given
+        assert 'n_y' in params and 'n_x' in params and 'n_u' in params,\
+                "The number of observations, control inputs, and hidden variables (states) should be given"
+
         # Save the parameters
         self.params = params
 
@@ -46,8 +49,26 @@ class LatentSDE(hk.Module):
         self.init_encoder()
 
         # Initialize the SDE solver
-        self.sde_solve = differentiable_sde_solver(params.get('sde_solver', {}))
+        self.sde_solve = sde_solver_name[params.get('sde_solver', 'stratonovich_milstein')]
 
+        # Initalize the way the posterior drift is computed with respect to prior
+        self.init_error_prior_drift()
+
+        if self.posterior_is_prior_plus_error:
+            self.posterior_drift = lambda t, x, u: self.prior_error(t,x,u) + self.prior_drift(t,x,u)
+
+        assert (self.posterior_is_prior_plus_error and hasattr(self, 'prior_error')) or \
+            (not self.posterior_is_prior_plus_error and not hasattr(self, 'prior_error')),\
+            'posterior_is_prior_plus_error should match an existing function prior_error'
+
+
+    def init_error_prior_drift(self):
+        """ Essentially set the variable posterior_is_prior_plus_error
+            if that variable is True, then a function named prior_error must be
+            defined, which returns a value that add up to the prior to obtain posterior drif
+            self.prior_error  = lambda t,x,u ->
+        """
+        self.posterior_is_prior_plus_error = False
 
     def prior_diffusion(self, t, x):
         """Save the prior diffusion function with the attribute name 'prior_diffusion'
@@ -83,6 +104,8 @@ class LatentSDE(hk.Module):
             u (TYPE): The current control signal applied to the system
         """
         pass
+
+
 
     def init_encoder(self):
         """ Define a function to encode from the current observation to the
@@ -128,7 +151,7 @@ class LatentSDE(hk.Module):
         return self.normal_dist_compute(y, rng, mean_fn, noise_fn)[0]
 
     def normal_dist_compute(self, y, rng, mean_fn, noise_fn):
-        """ Cmpute a Gaussian estimate given a mean and standard deviation function
+        """ Compute a Gaussian estimate given a mean and standard deviation function
         """
         x_mean = mean_fn(y)
         x_sigma = noise_fn(y)
@@ -218,65 +241,58 @@ class LatentSDE(hk.Module):
         """
         # Load the sde solver or define a new solver
         if params_solver is not None:
-            sde_solve = differentiable_sde_solver(params_solver)
+            sde_solve = sde_solver_name[params_solver.get('sde_solver', 'stratonovich_milstein')]
         else:
             sde_solve = self.sde_solve
-
-        # This test if when uVal is given as a function of t and x
-        # rather than an array of float values
-        if not hasattr(uVal, 'ndim'):
-            u_fun = uVal
-        elif uVal.ndim == 1:
-            u_fun = lambda t, x : uVal
-        else:
-            # Check the control input dimension and broadcast it if needed
-            assert uVal.ndim ==2 and uVal.shape[0] == ts.shape[0],\
-                'Control u should be a 2D array and should match ts size'
-            # Now define the control as a linear interpolation of time
-            u_fun = lambda t, x : linear_interpolation(t, ts, uVal)
-
-        # Modified the vector field to implement a time-varying control
-        drift_fn = lambda t, x, args=None : drift_term(t, x, u_fun(t, x))
-        diff_fn = lambda t, x, args=None : diff_term(t, x)
 
         # Finally solve the stochastic differential equation
         if hk.running_init():
             # Dummy return in this case -> This case is just to initialize NNs
             # Initialize the drift and diffusion parameters
-            drift_val = drift_fn(ts[0], x0)
-            diff_val = diff_fn(ts[0], x0)
+            drift_val = drift_term(ts[0], x0, uVal if uVal.ndim ==1 else uVal[0])
+            diff_val = diff_term(ts[0], x0)
 
             #[TODO Franck] Maybe make the return type to be the same after sde_solve
             #Fine if the returned types are different at initilization
             return jnp.zeros_like(x0)[None] # 2D array to be similar with sde_solve
         else:
             # Solve the sde and return its output (latent space)
-            return sde_solve(ts, x0, rng_brownian, drift_fn, diff_fn)
+            return sde_solve(ts, x0, uVal, rng_brownian, drift_term, diff_term)
 
     def sample_for_loss_computation(self, ts, meas_y, uVal, rng):
-        """Summary
+        """Compute the log-probability of the measured path at time indexes and
+            given the control inputs uVal. This also estimates the KL-divergence
+            in order to properly fit the SDE via the ELBO bound.
+
+            This function is typically used for fitting data to SDEs
 
         Args:
-            ts (TYPE): Description
-            meas_y (TYPE): Description
-            uVal (TYPE): Description
-            rng (TYPE): Description
+            ts (TYPE): The time indexes for integration
+            meas_y (TYPE): The measured observations at the different time indexes
+            uVal (TYPE): The control inputs applied at the different time indexes
+            rng (TYPE): The random key generator for brownian noise
 
         Returns:
-            TYPE: Description
+            TYPE: logprob, kl_divergence, some extra computation as a dictionary
         """
         # Check if the trajectory horizon matches
-        assert ts.shape[0] == meas_y.shape[0] and meas_y.shape[0] == uVal.shape[0],\
+        assert ts.shape[0] == meas_y.shape[0] and \
+                (meas_y.shape[0] == uVal.shape[0]+1 or meas_y.shape[0] == uVal.shape[0]),\
                 'Trajectory horizon must match'
 
         # Define the augmented dynamics or the ELBO bound
         def augmented_drift(_t, _aug_x, _u):
             """ Define the augmented drift function """
             _x = _aug_x[:-1]
-            drift_pos_x = self.posterior_drift(_t, _x, _u)
             drift_pri_x = self.prior_drift(_t, _x, _u)
+            if self.posterior_is_prior_plus_error:
+                error_prior = self.prior_error(_t, _x, _u)
+                drift_pos_x = drift_pri_x + error_prior
+            else:
+                drift_pos_x = self.posterior_drift(_t, _x, _u)
+                error_prior = drift_pos_x - drift_pri_x
             diff_x = self.prior_diffusion(_t, _x) # A vector
-            cTerm = 0.5 * jnp.sum(jnp.square((drift_pos_x - drift_pri_x)/diff_x))
+            cTerm = 0.5 * jnp.sum(jnp.square((error_prior)/diff_x))
             return jnp.concatenate((drift_pos_x, jnp.array([cTerm])))
 
         def augmented_diffusion(_t, _aug_x):
@@ -301,41 +317,36 @@ class LatentSDE(hk.Module):
         # as a function of the observation
         plogVal = self.logprob(meas_y[1:], xnext[1:], rng_logprob)
 
-        # Extra values to print
-        extra = {'noise' : jnp.mean(self.prior_diffusion(ts[0], aug_x0))}
+        # Extra values to print or to penalize the loss function on
+        extra = {}
 
         return plogVal, kl_div, extra
 
-    def sample_dynamics_with_cost(self, ts, y, u, rng, cost_fn, slack=None):
+    def sample_dynamics_with_cost(self, ts, y, u, rng, cost_fn):
         """Generate a function that integrate the sde dynamics augmented with a cost
-           function evolution (which is also integrated along the dynamics)
+           function evolution (which is also integrated along the dynamics).
+           The cost function is generally the cost we want to minimize
+           in a typically Nonlinear MPC problem
 
         Args:
             ts (TYPE): The time indexes at which the integration happens
             y (TYPE): The current observation of the system
-            u (TYPE): The sequence of control to applied at each time step
+            u (TYPE): The sequence of control to applied at each time step (can be merged with slack)
             rng (TYPE): A random key generator for Brownian noise
             cost_fn (TYPE): The cost function to integrate
                             cost_fn : (_x, _u, _slack)
-            slack (None, optional): Slack variable that are used in the cost function
-                                    They are extrapolated similarly to the control inputs
-                                    before integration
 
-        Raises:
-            The state at the last time Ts and
+        Returns:
+            TYPE: The state's evolution as well as cost evolution along the trajectory
         """
-        # If slack variables are given extrapolate it over the time horizon
-        assert slack is None or (slack.ndim == 2 and slack.shape[0] == ts.shape[0]), \
-                'Slack dimension and the time horizon should match for interpolation'
-        slack_fun = lambda t : None if slack is None else linear_interpolation(t, ts, slack)
-
         # Define the augmented dynamics
         def cost_aug_drift(_t, _aug_x, _u):
             _x = _aug_x[:-1]
-            drift_pos_x = self.posterior_drift(_t, _x, _u)
-            slack_t = slack_fun(_t)
+            actual_u = _u[:self.params['n_u']]
+            drift_pos_x = self.posterior_drift(_t, _x, actual_u)
+            slack_t = _u[self.params['n_u']:] if _u.shape[0] > self.params['n_u'] else None
             # [TODO Franck] Maybe add time dependency ?
-            cost_term = cost_fn(_x, _u, slack_t)
+            cost_term = cost_fn(_x, actual_u, slack_t)
             return jnp.concatenate((drift_pos_x, jnp.array([cost_term])))
 
         def cost_aug_diff(_t, _aug_x):
@@ -344,40 +355,45 @@ class LatentSDE(hk.Module):
             return jnp.concatenate((diff_x, jnp.array([0.])))
 
         # Now convert the observation to a state and then integrate it
-        rng_obs2state, rng_brownian = jax.random.split(rng, 2)
+        rng_obs2state, rng_brownian = jax.random.split(rng)
         x =  self.obs2state(y, rng_obs2state)
 
         # Solve the augmented integration problem
         aug_x = jnp.concatenate((x, jnp.array([0.])) )
-        est_x = self.sample_general(cost_aug_drift, cost_aug_diff, ts, aug_x, u, rng_brownian)
-        return est_x
+        return self.sample_general(cost_aug_drift, cost_aug_diff, ts, aug_x, u, rng_brownian)
 
 
-def create_sampling_fn(params_model, sde_constr= LatentSDE, prior_sampling=True, seed=0):
+
+def create_sampling_fn(params_model, sde_constr= ControlledSDE, prior_sampling=True, seed=0):
     """Create a sampling function for prior or posterior distribution
 
     Args:
         params_model (TYPE): The SDE solver parameters and model parameters
-        sde_constr (TYPE): A class constructor that is child of LatentSDE class
+        sde_constr (TYPE): A class constructor that is child of ControlledSDE class
         prior_sampling (bool, optional): Specify if the returned function samples from prior or posterior
         seed (int, optional): A value to initialize the parameters of the model
 
     Returns:
-        TYPE: Description
+        TYPE: The parameters of the model, a function for multi-sampling
     """
+    # Some dummy initialization scheme
+    #[TODO Franck] Maybe something more general in case these inputs are not valid
     rng_zero = jax.random.PRNGKey(seed)
     yzero = jnp.ones((params_model['n_y'],))
     uzero = jnp.ones((params_model['n_u'],))
+    tzero = jnp.array([0., 0.001])
     num_sample = params_model['num_particles']
+
     # Define the transform for the sampling function
     def sample_sde(t, y, u, rng):
+        """ Sampling function """
         m_model = sde_constr(params_model)
         m_sampling = m_model.sample_prior if prior_sampling else m_model.sample_posterior
         return m_sampling(t, y, u, rng)
 
     # Transform the function into a pure one
     sampling_pure =  hk.without_apply_rng(hk.transform(sample_sde))
-    nn_params = sampling_pure.init(rng_zero, jnp.array([0., 0.001]), yzero, uzero, rng_zero)
+    nn_params = sampling_pure.init(rng_zero, tzero, yzero, uzero, rng_zero)
 
     # Now define the n_sampling method
     def multi_sampling(_nn_params, t, y, u, rng):
@@ -388,30 +404,30 @@ def create_sampling_fn(params_model, sde_constr= LatentSDE, prior_sampling=True,
 
     return nn_params, multi_sampling
 
-def create_loss_fn(params_model, params_loss, sde_constr=LatentSDE, seed=0):
-    """Create a sampling function for prior or posterior distribution
+
+
+def create_model_loss_fn(params_model, params_loss, sde_constr=ControlledSDE, seed=0):
+    """Create a loss function for evaluating the current model with respect to some
+       pre-specified dataset
 
     Args:
-        params_model (TYPE): The SDE solver parameters and model parameters
-        params_loss (TYPE): The SDE solver parameters and model parameters
-        sde_constr (TYPE): A class constructor that is child of LatentSDE class
+        params_model (TYPE): The SDE model and solver parameters
+        params_loss (TYPE): The pamaters used in the loss function. Typically penalty coefficient
+                            for the different losses.
+        sde_constr (TYPE): A class constructor that is child of ControlledSDE class
         seed (int, optional): A value to initialize the parameters of the model
 
     Returns:
-        TYPE: Description
+        TYPE: The parameters of the model, a function to compute a loss with respect to a dataset
     """
     rng_zero = jax.random.PRNGKey(seed)
     tzero = jnp.zeros((2,))
     yzero = jnp.ones((2,params_model['n_y']))
-    uzero = jnp.ones((2,params_model['n_u'],))
+    uzero = jnp.ones((1,params_model['n_u'],))
 
-    num_sample = params_model['num_particles']
-    ts = None if not params_model['fixed_ts'] else \
-            np.array([i * params_model['sde_solver']['init_step'] \
-                        for i in range(params_loss['horizon']) ])
+    num_sample = params_model['num_particles_learning_sde']
 
     # Define the transform for the sampling function
-    # ts, meas_y, uVal, rng
     def sample_sde(t, y, u, rng):
         m_model = sde_constr(params_model)
         return m_model.sample_for_loss_computation(t, y, u, rng)
@@ -428,17 +444,14 @@ def create_loss_fn(params_model, params_loss, sde_constr=LatentSDE, seed=0):
         return vmap_sampling(_nn_params, t, y, u, m_rng)
 
     def loss_fn(_nn_params, y, u, rng, t=None):
+        # CHeck if rng is given as  a ingle key
         assert rng.ndim == 1, 'THe rng key is splitted inside the loss function computation'
+
         # Split the key first
         rng = jax.random.split(rng, y.shape[0])
 
         # Do multiple step prediction of state and compute the logprob and KL divergence
-        if ts is not None:
-            batch_vmap = jax.vmap(multi_sampling, in_axes=(None, None, 0, 0, 0))
-            t = ts
-        else:
-            assert t is not None, "Both t and ts can not be None"
-            batch_vmap = jax.vmap(multi_sampling, in_axes=(None, 0, 0, 0, 0))
+        batch_vmap = jax.vmap(multi_sampling, in_axes=(None, 0, 0, 0, 0))
         logprob, kl_div, extra_feat = batch_vmap(_nn_params, t, y, u, rng)
 
         # [TODO Franck] Remove this check as it might be useless
@@ -446,33 +459,40 @@ def create_loss_fn(params_model, params_loss, sde_constr=LatentSDE, seed=0):
         assert logprob.shape == (y.shape[0], num_sample) and \
                 kl_div.shape == (y.shape[0], num_sample), "Dimension does not match"
 
-        # We change the sign for a cost function to minimize
+        # We change the sign for the cost function that is suitable for minimization
         # Compute the mean of the logprob estimation
         loss_logprob = -jnp.mean(jnp.mean(logprob, axis=1))
 
-        # Cmpute the mean of the logprob estimation
+        # Cmpute the mean of the kl_divergence
         loss_kl_div = jnp.mean(jnp.mean(kl_div, axis=1))
 
-        # Extra feature mean
+        # Extra feature mean if there is any
         m_res = { k: jnp.mean(jnp.mean(v, axis=1)) for k, v in extra_feat.items()}
 
         # Compute the total sum
         total_sum = loss_logprob * params_loss['logprob']
         total_sum += loss_kl_div * params_loss['kl']
-        total_sum += - m_res['noise'] * params_loss['noise'] # Maximimze the noise
-        return total_sum, {'logprob' : loss_logprob, 'kl' : loss_kl_div, **m_res}
+
+        return total_sum, {'Loss' : total_sum, 'logprob' : loss_logprob, 'kl' : loss_kl_div, **m_res}
 
     return nn_params, loss_fn
 
-def create_cost_sampling_fn(params_model, cost_fn,
-                            terminal_cost=None,
-                            sde_constr= LatentSDE,
-                            seed=0):
-    """Create a sampling function for the posterior combined with a loss function
+
+def create_valuefun_loss_fn(params_model, params_loss, cost_fn, R_inv, sde_constr= ControlledSDE, seed=0):
+    """Create a function that integrates the dynamics as well as a cost function to minimize.
+       Typically, the cost function is the objective used in the underlying MPC problem.
+       This function returns a loss function to train the underlying value function of the system
+       while including the sde dynamics in the loss function
+       The idea follows the iterative improvement from generalized HJB equations
 
     Args:
         params_model (TYPE): The SDE solver parameters and model parameters
-        sde_constr (TYPE): A class constructor that is child of LatentSDE class
+        params_loss (TYPE): The pamaters used in the loss function. Typically penalty coefficient
+                            for the different losses.
+        cost_fn (TYPE): The cost function to optimize on the fly in a stochastic MPC manner
+        R_inv (TYPE): The cost function is assumed to be c(t,x) +uR(t,x)u. In this case,
+                      R_inv returns the inverse of R(t,x)
+        sde_constr (TYPE): A class constructor that is child of ControlledSDE class
         seed (int, optional): A value to initialize the parameters of the model
 
     Returns:
@@ -483,45 +503,19 @@ def create_cost_sampling_fn(params_model, cost_fn,
 
     # Initialization of the observation and uzero
     yzero = jnp.ones((params_model['n_y'],))
-    uzero = jnp.ones((2,params_model['n_u']))
+    xzero = jnp.ones((params_model['n_x'],))
+    uzero = jnp.ones((1,params_model['n_u']))
     tzero = jnp.array([0., 0.001])
 
     # Number of control inputs
     n_u = params_model['n_u']
 
     # Save the number of samples
-    num_sample = params_model['num_particles']
+    num_sample = params_model['num_particles_valuefun_learning']
 
-    # Check if some bounds on u are present
-    has_ubound = 'input_constr' in params_model
-    if has_ubound:
-        print('Found input bound constraints...\n')
-        input_lb = [-jnp.inf for _ in range(n_u)]
-        input_ub =[jnp.inf for _ in range(n_u)]
-        input_dict = params_model['input_constr']
-        assert len(input_dict['input_id']) <= n_u and \
-                len(input_dict['input_id']) == len(input_dict['input_bound']),\
-                "The number of constrained inputs identifier does not match the number of bounds"
-        for idx, (u_lb, u_ub) in zip(input_dict['input_id'], input_dict['input_bound']):
-            input_lb[idx], input_ub[idx] = u_lb, u_ub
-        input_lb = jnp.array(input_lb)
-        input_ub = jnp.array(input_ub)
-
-    # Check if bounds on the state are present
-    has_xbound = 'state_constr' in params_model
-    # By default we impose bounds constraint on the states using nonsmooth penalization
-    slack_proximal = False
-    if has_xbound:
-        print('Found states bound constraints...\n')
-        slack_dict = params_model['state_constr']
-        assert len(slack_dict['state_id']) <= params_model['n_x'] and \
-                len(slack_dict['state_id']) == len(slack_dict['state_bound']),\
-                'The number of the constrained states identifier does not match the number of bounds'
-        state_idx = jnp.array(slack_dict['state_id'])
-        slack_proximal = slack_dict['slack_proximal']
-        penalty_coeff = slack_dict['state_penalty']
-        state_lb = jnp.array([x[0] for x in slack_dict['state_bound']])
-        state_ub = jnp.array([x[1] for x in slack_dict['state_bound']])
+    (has_ubound, input_lb, input_ub),\
+        (has_xbound, _, state_idx, penalty_coeff, state_lb, state_ub ) = \
+            initialize_problem_constraints(params_model)
 
     def constr_cost_noprox(x_true, slack_x=None):
         """ Penalty method with nonsmooth cost fuction
@@ -529,7 +523,186 @@ def create_cost_sampling_fn(params_model, cost_fn,
         x = x_true[state_idx]
         # diff_x should always be less than 0
         diff_x = jnp.concatenate((x - state_ub, state_lb - x))
-        #[TODO Franck] Maybe sum the error instead of doing a mean over states
+        #[TODO Franck] Maybe sum/mean the error instead of doing a mean over states
+        return jnp.sum(jnp.where( diff_x > 0, 1., 0.) * jnp.square(diff_x))
+
+    # A function to constraint a vector between a given minimum and maximum values
+    constr_vect = lambda a, a_lb, a_ub:  jnp.minimum(jnp.maximum(a, a_lb), a_ub)
+
+    # Now ready to define the constraint cost as well as the proximal operator if needed
+    constr_cost = None
+    proximal_fn = None
+
+    # No bound on u are given but x is constrained and we are using proximal operator
+    # To constrain the slack variable associated with these states
+    if has_xbound:
+        constr_cost = constr_cost_noprox
+
+    if has_ubound and params_model.get('enforce_ubound', False):
+        proximal_fn = lambda _u: constr_vect(_u, input_lb, input_ub)
+
+    # Define the augmented cost with the penalization term
+    def aug_cost_fn(_x, _u, _slack=None, final_cost=None):
+        # Compute the actual cost
+        actual_cost = final_cost(_x) if final_cost is not None else cost_fn(_x, _u)
+        if constr_cost is None:
+            return actual_cost
+        # Compute the constraints cost
+        pen_cost = constr_cost(_x, _slack)
+        return actual_cost + penalty_coeff * pen_cost
+
+    # Define the function to integrate the cost function and the dynamics
+    def sample_cost_evol(t, y, _u, rng):
+        # Build the SDE solver
+        m_model = sde_constr(params_model)
+        # Compute the evolution of the state -> u is a function so second return argument are the function values
+        x_evol, _ = m_model.sample_dynamics_with_cost(t, y, _u, rng, aug_cost_fn)
+        # Estimate the value function at the startign state
+        value_xt = m_model.value_fn(x_evol[0,:-1])
+        # Estimate the value function at the ending state -> If terminal cost at an end time are given
+        value_xf = m_model.value_fn(x_evol[-1,:-1])
+        # final integrated cost, final state, est value at initial time, est value at end time
+        return x_evol[-1,-1], x_evol[-1,:-1], value_xt, value_xf
+
+    # Define the control function to apply for value function update
+    def control_affine_opt(t, x):
+        """ Return optimal control given value function and control affine dynamics
+        """
+        # Obatin the model
+        m_model = sde_constr(params_model)
+
+        # Some check up
+        assert hasattr(m_model, 'G_fn'), \
+            "The class should contain a function to evaluate the control affine coefficient of the dynamics"
+        assert hasattr(m_model, 'value_fn'), \
+            "The class should contain a function value_fn to estimate the cost to go/ value function"
+
+        # COmpute the control matrix coefficient in f(t,x) + G(t,x) @ u
+        G_val = m_model.G_fn(t, x)
+
+        if hk.running_init():
+            # Trick so that we can call jax.grad inside in haiku module
+            Vval = m_model.value_fn(x)
+            grad_value_fn = jnp.full(x.shape, Vval)
+        else:
+            grad_value_fn = jax.grad(m_model.value_fn)(x)
+        # Compute the optimal control input given the value function
+        u_opt = - R_inv(t, x) @ (G_val.T @ grad_value_fn)
+
+        #[TODO Franck] Maybe not a good idea looking at the theory
+        # But this can be deactivated using the 'enforce_ubound' parameter input
+        if proximal_fn is not None:
+            # Constrain the control if required
+            u_opt = proximal_fn(u_opt)
+
+        return u_opt
+
+    # Define the control function to apply for value function update
+    def value_function(x):
+        """ Return the value function/cost-to-go for a given state
+        """
+        m_model = sde_constr(params_model)
+        assert hasattr(m_model, 'value_fn'), \
+            "The class should contain a function value_fn to estimate the cost to go/ value function"
+        return m_model.value_fn(x)
+
+    # Now transform all functions to pure functions
+    control_affine_pure = hk.without_apply_rng(hk.transform(control_affine_opt))
+    _params_control_affine = control_affine_pure.init(rng_zero, tzero[0], xzero)
+
+    value_function_pure = hk.without_apply_rng(hk.transform(value_function))
+    _params_value_function = value_function_pure.init(rng_zero,xzero)
+
+    sample_cost_evol_pure = hk.without_apply_rng(hk.transform(sample_cost_evol))
+    _params_sample_cost_evol = sample_cost_evol_pure.init(rng_zero, tzero, yzero, uzero, rng_zero)
+
+    # Now define the n_sampling method
+    def multi_sampling_value_fn(_nn_params, t, y, rng, _nn_params_terminal, terminal_info=None):
+        assert rng.ndim == 1, 'RNG must be a single key for vmapping'
+        u_fun = lambda _t, _x: control_affine_pure.apply(_nn_params_terminal, _t, _x)
+        cost_to_go = lambda _x: value_function_pure.apply(_nn_params_terminal, _x)
+
+        def cost_and_costogo(_t, _y, _rng):
+            total_cost, xfinal, value_xt, value_xf = sample_cost_evol_pure.apply(_nn_params, _t, _y, u_fun, _rng)
+            end_cost = aug_cost_fn(xfinal, None, None, final_cost = cost_to_go)
+            if terminal_info is not None:
+                T, terminal_fn = terminal_info
+                diff_terminal = jnp.where(_t >= T, terminal_fn(xfinal)-value_xf, jnp.array(0.))
+            else:
+                diff_terminal = jnp.array(0.)
+            diff_initial = total_cost + end_cost - value_xt
+            return diff_initial, diff_terminal
+
+        m_rng = jax.random.split(rng, num_sample)
+        diff_initial, diff_terminal = jax.vmap(cost_and_costogo)(t, y, m_rng)
+        return jnp.square(jnp.mean(diff_initial)), jnp.square(jnp.mean(diff_terminal))
+
+    # Define the loss function to learn value function and optimize it
+    def loss_fn(_nn_params, t, y, rng, _nn_params_terminal, terminal_info=None):
+        assert rng.ndim == 1, 'The rng key is splitted inside the loss function computation'
+
+        # Split the key first
+        rng = jax.random.split(rng, y.shape[0])
+
+        # Do multiple step prediction of state and compute the logprob and KL divergence
+        batch_vmap = jax.vmap(multi_sampling_value_fn, in_axes=(None, 0, 0, 0, None, None))
+        diff_value_xt, diff_value_xend = batch_vmap(_nn_params, t, y, rng, _nn_params_terminal, terminal_info)
+
+        diff_value_xt = jnp.mean(diff_value_xt)
+        diff_value_xend = jnp.mean(diff_value_xend)
+        total_sum = params_loss['Vt'] * diff_value_xt + params_loss['Vend'] * diff_value_xend
+
+        # Estimated value function
+        est_value = value_function_pure.apply(_nn_params, )
+        return total_sum, {'ErrorValue': total_sum, 'Vt' : diff_value_xt, 'Vend' : diff_value_xend}
+
+    return (_params_sample_cost_evol, _params_control_affine, _params_value_function), control_affine_pure.apply, loss_fn
+
+
+
+def create_online_cost_sampling_fn(params_model, cost_fn,
+                            terminal_cost=None,
+                            sde_constr= ControlledSDE,
+                            seed=0):
+    """Create a function that integrate the dynamics as well as a cost function to minimize.
+       Typically, the cost function is the objective used in the underlying MPC problem
+
+    Args:
+        params_model (TYPE): The SDE solver parameters and model parameters
+        cost_fn (TYPE): The cost function to optimize on the fly in a stochastic MPC manner
+        terminal_cost (None, optional): The terminal cost, if available
+        sde_constr (TYPE): A class constructor that is child of ControlledSDE class
+        seed (int, optional): A value to initialize the parameters of the model
+
+    Returns:
+        TYPE: Description
+    """
+    # Random ky for initialization
+    rng_zero = jax.random.PRNGKey(seed)
+
+    # Number of control inputs
+    n_u = params_model['n_u']
+
+    # Initialization of the observation and uzero
+    yzero = jnp.ones((params_model['n_y'],))
+    uzero = jnp.ones((1, n_u))
+    tzero = jnp.array([0., 0.001])
+
+    # Save the number of samples
+    num_sample = params_model['num_particles_online_control']
+
+    (has_ubound, input_lb, input_ub),\
+        (has_xbound, _, state_idx, penalty_coeff, state_lb, state_ub ) = \
+            initialize_problem_constraints(params_model)
+
+    def constr_cost_noprox(x_true, slack_x=None):
+        """ Penalty method with nonsmooth cost fuction.
+            This should be avoided when doing nonlinear MPC usin accelerated gradient descent
+        """
+        x = x_true[state_idx]
+        # diff_x should always be less than 0
+        diff_x = jnp.concatenate((x - state_ub, state_lb - x))
+        #[TODO Franck] Maybe mean/sum the error instead of doing a mean over states
         return jnp.sum(jnp.where( diff_x > 0, 1., 0.) * jnp.square(diff_x))
 
     def constr_cost_withprox(x_true, slack_x):
@@ -538,7 +711,7 @@ def create_cost_sampling_fn(params_model, cost_fn,
         return jnp.sum(jnp.square(x_true[state_idx]-slack_x))
 
     # A function to constraint a vector between a given minimum and maximum values
-    constr_vect = lambda a, a_lb, a_ub:  jnp.maximum(jnp.minimum(a, a_lb), a_ub)
+    constr_vect = lambda a, a_lb, a_ub:  jnp.minimum(jnp.maximum(a, a_lb), a_ub)
 
     # Now ready to define the constraint cost as well as the proximal operator if needed
     constr_cost = None
@@ -593,33 +766,40 @@ def create_cost_sampling_fn(params_model, cost_fn,
 
     # Define the function to integrate the cost function and the dynamics
     def sample_sde(t, y, opt_params, rng):
+
         # Do some check
         assert opt_params.ndim == 2, 'The parameters must be a two dimension array'
-        print(opt_params_size, opt_params)
         if has_slack:
             assert opt_params.shape[1] == opt_params_size, 'Shape of the opt params do not match'
         else:
             assert opt_params.shape[1] == n_u, 'Shape of the opt params do not match'
-        assert t.shape[0] == opt_params.shape[0], 'Time step should match the parameter size'
-        # Separate the parameters into slack variable and control variable
-        u_val, slack = (opt_params[:, :n_u], opt_params[:,n_u:]) if has_slack else (opt_params, None)
+        assert (t.shape[0] == opt_params.shape[0]) or (t.shape[0] == opt_params.shape[0]+1),\
+                 'Time step should match the parameter size'
+
         # Build the SDE solver
         m_model = sde_constr(params_model)
+
         # Compute the evolution of the state
-        x_evol = m_model.sample_dynamics_with_cost(t, y, u_val, rng, aug_cost_fn, slack)
+        x_evol = m_model.sample_dynamics_with_cost(t, y, opt_params, rng, aug_cost_fn)
+
         # Evaluate the cost_to_go function
+        # [TODO Franck] probably a bug here when using ts.shape-1 optimization variable
+        # When has_slack should have ts.shape opt variable so that the slack
+        # matches the end state/final state
         end_cost = aug_cost_fn(x_evol[-1,:-1], None,
-                                slack[-1] if slack is not None else slack,
+                                opt_params[-1, n_u:] if has_slack else None,
                                 final_cost=True)
+
         # Compute the total cost by adding the terminal cost
         total_cost = end_cost + x_evol[-1,-1]
         return total_cost, x_evol[:,:-1]
 
     # Initialize an optimization parameters given a sequence of STATE x and u
-    # [TODO Fanck] Define it in terms of observation and use the state to observation
-    # transformation to match the output
-    # However the call of this with an observation will only happen once
+    # [TODO Fanck] Define it in terms of observation and use the state to observation transformation to match the output
+    # However the call of this with an observation will only happen once...
     def construct_opt_params(x, u):
+        """ u  must be the same shape as the time step """
+        assert u.ndim == 2, 'The control must be a 2D over the time horizon'
         if not has_slack:
             return u
         zero_x = jnp.zeros((u.shape[0],len(state_idx),))
@@ -629,9 +809,7 @@ def create_cost_sampling_fn(params_model, cost_fn,
 
     # Transform the function into a pure one
     sampling_pure =  hk.without_apply_rng(hk.transform(sample_sde))
-    nn_params = sampling_pure.init(rng_zero, tzero, yzero,
-                                    construct_opt_params(None, uzero),
-                                    rng_zero)
+    nn_params = sampling_pure.init(rng_zero, tzero, yzero, construct_opt_params(None, uzero), rng_zero)
 
     # Now define the n_sampling method
     def multi_sampling(_nn_params, t, y, opt_params, rng):
@@ -644,190 +822,3 @@ def create_cost_sampling_fn(params_model, cost_fn,
     # Properly define the proximal_function
     vmapped_prox = None if proximal_fn is None else jax.vmap(proximal_fn)
     return nn_params, multi_sampling, vmapped_prox, constr_cost, construct_opt_params
-
-
-def load_model_from_file(file_dir, sde_constr, seed=0, num_particles=None):
-    """ Load and return the learned weight parameters, and
-        a function to estimate/predict trajectories of the system
-
-    Args:
-        file_dir (str): Directory of the file containing models parameters+opt weight
-    """
-    # Load the file containing the trajectory
-    mFile = open(file_dir, 'rb')
-    mData = pickle.load(mFile)
-    mFile.close()
-
-    m_params = mData["best_params"]
-    params_model = mData['training_parameters']['params']['model']
-    if num_particles is not None:
-        params_model['num_particles'] = num_particles
-
-    prior_params, _prior_fn = create_sampling_fn(params_model, sde_constr=sde_constr,
-                                    prior_sampling=True, seed=seed)
-    posterior_params, _posterior_fn = create_sampling_fn(params_model, sde_constr=sde_constr,
-                                    prior_sampling=False, seed=seed)
-    prior_fn = lambda t, y, u, rng: _prior_fn(prior_params, t, y, u, rng)
-    posterior_fn = lambda t, y, u, rng: _posterior_fn(m_params, t, y, u, rng)
-    return prior_fn, posterior_fn, \
-        {'prior_params':prior_params, 'posterior_params': posterior_params,
-         'model' : params_model, 'best_params' : m_params}
-
-
-def differentiable_sde_solver(params_solver={}):
-    """Construct and return a function that solves sdes and that is
-        differentiable in forward and reverse mode
-
-    Args:
-        params_solver (dict): A dictionary containing solver specific parameters.
-            The key and value of the dictionary are described below:
-          - max_steps=4096 : The maximum steps when discretizing the SDE
-
-          - init_step=0.1 : The initial time step of the numerical integrator
-
-          - stepsize_controller=diffrax.ConstantStepSize(.)
-                    or for adaptive scheme diffrax.PIDController(rtol,atol, ...)
-
-          - adjoint=diffrax.RecursiveCheckpointAdjoint() or diffrax.NoAdjoint()
-
-          - solver=diffrax.ReversibleHeun() : Define the solver to use for
-                                              numerical integration
-
-          - specific_sde=False : Boolean specifying if solver is specific
-                                (see Diffrax documentation)
-
-          - brownian_tol = init_step/2 : Specify the threshold in the virtual
-                                         brownian tree when using fixed/adaptive time step
-                                         integrator. For fixed time step, a value slightly
-                                         lower than the time step is enough. For adaptive
-                                         time step, it should be small but the complexity
-                                         (computation) increases too.
-                                         https://docs.kidger.site/diffrax/api/brownian/#diffrax.VirtualBrownianTree
-
-          - ts = jnp.array([t0, t1, .., tn]) : Time indexes to save the solution
-                                       of the integration
-    """
-    # Extract the parameters to construct the numerical differentiator
-    specific_sde = params_solver.get('specific_sde', False)
-
-    # Extract the maximum number of steps to solve the problem
-    max_steps = params_solver.get('max_steps', 4096)
-
-    # Initial time step
-    dt0 = params_solver.get('init_step', 0.001)
-
-    # Pick the step size controller
-    if 'stepsize_controller' not in params_solver:
-        stepsize_controller = diffrax.ConstantStepSize()
-    else:
-        stepsize_fn = params_solver['stepsize_controller'].get('name', 'ConstantStepSize')
-        stepsize_args = params_solver['stepsize_controller'].get('params', {})
-        stepsize_controller = getattr(diffrax, stepsize_fn)(**stepsize_args)
-
-    # Specify if adjoint method is enable for backpropagtion
-    if 'adjoint' not in params_solver:
-        adjoint = diffrax.RecursiveCheckpointAdjoint()
-    else:
-        adjoint_fn = params_solver['adjoint'].get('name', 'RecursiveCheckpointAdjoint')
-        adjoint_args = params_solver['adjoint'].get('params', {})
-        adjoint = getattr(diffrax, adjoint_fn)(**adjoint_args)
-
-    # Construct the SDE solver
-    if 'solver' not in params_solver:
-        solver = diffrax.ReversibleHeun()
-    else:
-        solver_fn = params_solver['solver'].get('name', 'ReversibleHeun')
-        solver_args = params_solver['solver'].get('params', {})
-        solver = getattr(diffrax, solver_fn)(**solver_args)
-
-    # Level of tolerance of the brownian motion
-    b_tol = params_solver.get('brownian_tol', dt0-1e-6)
-
-    # Define the integration scheme given the drift and diffusion terms
-    def sde_solve(ts, z0, rng_brownian, drift_fn, diffusion_fn):
-        """Solve a stochastic differential equation given the drift
-           diffusion functions
-
-        Args:
-            ts (jnp.array): The integration time of the SDEs
-            z0 (jnp.array): The initial state of the system
-            rng_brownian (jnp.array): A seed to generate brownian motion
-            drift_fn (function): The drift function of the SDE
-            diffusion_fn (function): The diffusion function of the SDEs
-
-        Returns:
-            function: A function to solve the SDEs
-        """
-        # Create the ODE term corresponding to the drift function
-        ode_term = diffrax.ODETerm(drift_fn)
-
-        # Use virtual brownian tree if backprop is enabled
-        brownian_motion = diffrax.VirtualBrownianTree(
-                            t0=ts[0], t1=ts[-1], tol=b_tol, shape=(z0.shape[-1],),
-                            key=rng_brownian
-                            )
-
-        # [TODO] better than diagonal diffusion term
-        # Create the diffusion term  -> Assume diagonal diffusion function
-        control_term = diffrax.WeaklyDiagonalControlTerm(
-                                diffusion_fn, brownian_motion)
-
-        # From diffrax, we need to differentiate sde-specific solvers
-        solv_term = (ode_term, control_term) if specific_sde else \
-                        diffrax.MultiTerm(ode_term,control_term)
-
-        # Point at which to save the solution
-        # The time at which the solutions are saved
-        saveat = diffrax.SaveAt(ts=ts)
-
-        # Solve the SDE given the time orizon and initial state
-        return diffrax.diffeqsolve(solv_term, solver, t0=ts[0], t1=ts[-1],
-                    dt0=dt0, y0=z0, saveat=saveat,
-                    stepsize_controller=stepsize_controller,
-                    adjoint=adjoint, max_steps=max_steps).ys
-
-    return sde_solve
-
-
-def linear_interpolation(x, xp, fp):
-    """Return a function to perform linear interpolation for a given value x.
-       THIS FUNCTION ASSUMES THAT xp IS ALREADY SORTED
-    Args:
-        xp (array): 1D array of float
-        fp (array): a function taken at x -> size(xp) x M
-    """
-    # This function assumes that xp is already sorted
-    i = jnp.clip(jnp.searchsorted(xp, x, side='right'), 1, xp.shape[0]-1)
-    df = fp[i] - fp[i - 1]
-    dx = xp[i] - xp[i - 1]
-    delta = x - xp[i - 1]
-    f = jnp.where((dx == 0), fp[i], fp[i - 1] + (delta / dx) * df)
-
-    #[TODO Franck]
-    # Check ranges ---> Probably is useless to check this
-    f = jnp.where(x < xp[0], fp[0], f)
-    f = jnp.where(x > xp[-1], fp[-1], f)
-
-    return f
-
-def heun_strat_solver(ts, z0, rng_brownian, drift_fn, diffusion_fn):
-    # Build the brownian motion for this integration
-    # [TODO Franck] Maybe create it in one go instead of every call
-    dw = jax.random.normal(key=rng_brownian, shape=(ts.shape[0]-1, z0.shape[0]))
-    # Define the body loop
-    def heun_step(cur_y, dnoise):
-        _t, _y = cur_y
-        _next_t, _dw = dnoise
-        _dt = _next_t - _t
-        drift_t = drift_fn(_t, _y)
-        diff_t = diffusion_fn(_t, _y)
-        sqr_dt = jnp.sqrt(_dt) * _dw
-        _ybar = _y + drift_t * _dt + diff_t * sqr_dt
-        _drift_t = drift_fn(_next_t, _ybar)
-        _diff_t = diffusion_fn(_next_t, _ybar)
-        _ynext = _y + 0.5 * (drift_t + _drift_t) * _dt + 0.5 * (diff_t + _diff_t) * sqr_dt
-        return (_next_t, _ynext), _ynext
-    carry_init = (ts[0], z0)
-    xs = (ts[1:], dw)
-    _, yevol = jax.lax.scan(heun_step, carry_init, xs)
-    return jnp.concatenate((z0[None], yevol))

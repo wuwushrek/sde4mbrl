@@ -1,6 +1,3 @@
-import pickle
-import time
-
 # Import JAX and utilities
 import jax
 
@@ -15,11 +12,57 @@ from tqdm.auto import tqdm
 
 import numpy as np
 
-import pandas as pd
-
 import copy
 
-from sde_wrapper import create_loss_fn
+from sde4mbrl.nsde import create_model_loss_fn, create_valuefun_loss_fn, create_sampling_fn
+from sde4mbrl.utils import update_params
+
+
+import pickle
+import pandas as pd
+import time
+
+def load_model_from_file(file_dir, sde_constr, seed=0, modified_params={}):
+    """Load and return the learned weight parameters, and
+        a function to estimate/predict trajectories of the system
+
+    Args:
+        file_dir (str): Directory of the file containing models parameters+opt weight
+        sde_constr (TYPE): The ControlledSDE instance that were used to generate file_dir
+        seed (int, optional): A random sed for parameters initialization
+        modified_params (dict, optional): A dictionary that contains parameters to modify for sampling
+
+    Returns:
+        TYPE: Description
+    """
+    # Load the file containing the best trained parameters and the model parameters
+    mFile = open(file_dir, 'rb')
+    mData = pickle.load(mFile)
+    mFile.close()
+
+    # Extract the optimal parameters of the model
+    m_params = mData["best_params"]
+    params_model = mData['training_parameters']['params']['model']
+
+    # Update the parameters with a user-supplied dctionary of parameters
+    params_model = update_params(params_model, modified_params)
+
+    # Create a sampling method for the prior
+    prior_params, _prior_fn = create_sampling_fn(params_model, sde_constr=sde_constr,
+                                    prior_sampling=True, seed=seed)
+
+    # Create a sampling method for the posterior distribution
+    posterior_params, _posterior_fn = create_sampling_fn(params_model, sde_constr=sde_constr,
+                                    prior_sampling=False, seed=seed)
+
+    # Make these functions model-parameters free
+    prior_fn = lambda t, y, u, rng: _prior_fn(prior_params, t, y, u, rng)
+    posterior_fn = lambda t, y, u, rng: _posterior_fn(m_params, t, y, u, rng)
+
+    return prior_fn, posterior_fn, \
+        {'prior_params':prior_params, 'posterior_params': posterior_params,
+         'model' : params_model, 'best_params' : m_params}
+
 
 def evaluate_loss_fn(loss_fn, m_params, data_eval, rng, num_iter):
     """Compute the metrics for evaluation accross the data set
@@ -45,7 +88,7 @@ def evaluate_loss_fn(loss_fn, m_params, data_eval, rng, num_iter):
         lossval, extra_dict = loss_fn(m_params, rng=loss_rng, **batch_current)
         lossval.block_until_ready()
         diff_time  = time.time() - curr_time
-        extra_dict = {**extra_dict, 'Total Loss' : lossval, 'Pred. Time' : diff_time}
+        extra_dict = {**extra_dict, 'Pred. Time' : diff_time}
 
         if len(result_dict) == 0:
             result_dict = {_key : np.zeros(num_iter) for _key in extra_dict}
@@ -55,7 +98,6 @@ def evaluate_loss_fn(loss_fn, m_params, data_eval, rng, num_iter):
             result_dict[_key][n_i] = v
 
     return {_k : np.mean(v) for _k, v in result_dict.items()}
-
 
 def split_dataset_into_finitehorizon_traj(dataset, np_rng, horizon, max_num_traj=None):
     """Split a dataset into an array of size (M, H).
@@ -74,36 +116,40 @@ def split_dataset_into_finitehorizon_traj(dataset, np_rng, horizon, max_num_traj
     Returns:
         TYPE: Description
     """
-    # Get the length of the trajectories
+    # Check the dimension of the problem
     total_num_traj = len(dataset['y'])
-    num_traj = total_num_traj if max_num_traj is None else min(max_num_traj, total_num_traj)
     len_traj = np.array([l.shape[0] for l in dataset['y']])
 
-    # Do some dimension checking
+    # Do some dimension checking with respect to y and t
     for key, v in dataset.items():
         assert len(v) == total_num_traj, 'Number of trajectories in dataset do not match'
         c_len_traj = np.array([l.shape[0] for l in v])
-        assert np.sum(c_len_traj - len_traj) == 0, 'Dimension in dataset do not match'
+        assert np.sum(c_len_traj-len_traj)==0 or \
+                (key == 'u' and np.sum(c_len_traj-len_traj)==-c_len_traj.shape[0]),\
+                 'Dimension in dataset does not match'
 
-    # Resulting array dictionary
-    splitted_dict = { k : [] for k in dataset}
+    # Generate a random starting index for each sub-trajectory in the dataset
+    # The trajectory is going to be slitted starting from that index
+    rand_starting_indx = [np_rng.integers(0, 2) for length_traj in len_traj]
 
-    # Now proceed with the separation
-    for traj_id in range(num_traj):
-        # Get the number of chunk and the remainder chunks
-        nb_chunk = len_traj[traj_id] // horizon
-        rem_chunk = len_traj[traj_id] % horizon
+    # This function returns the starting index for a given trajectory
+    start_indx_fn = lambda traj_id: rand_starting_indx[traj_id]
 
-        # Pick a random initialzation between 0 and len - horizon
-        indx = np_rng.integers(0, rem_chunk+1)
-        n_end = indx + nb_chunk * horizon
-        for k, v in dataset.items():
-            splitted_dict[k].extend(np.split(v[traj_id][indx:n_end], nb_chunk))
+    # Obtain the desired total number of trajectories
+    total_num_traj = total_num_traj if max_num_traj is None else min(total_num_traj, max_num_traj)
+
+    # Convert into numpy arrays for efficient access during training
+    # [TODO Franck] Maybe use datasets library for memory efficiency?
+    splitted_dict = { k : np.array([ (traj[i:i+horizon] if k != 'u' else traj[i:i+horizon-1]) \
+                               if i+horizon <= len_traj[id_traj] else (traj[len_traj[id_traj]-horizon:] if k != 'u' else traj[len_traj[id_traj]-horizon:len_traj[id_traj]-1]) \
+                               for id_traj, traj in zip(range(total_num_traj),v) \
+                                   for i in range(start_indx_fn(id_traj), len_traj[id_traj], horizon)
+                          ]) for k, v in dataset.items()
+                    }
     return splitted_dict
-    # return {k : np.array(v) for k, v in splitted_dict.items()}
 
 
-def shuffle_and_split(np_rng, splitted_dict, batch_size, shuffle=False):
+def shuffle_and_split(np_rng, splitted_dict, batch_size, shuffle=False, indx=None):
     """Given a dataset of trajetories, this function split the trajectries into
        fixed horizon trajectories and shuffle them. Then it returns a batched version
        of the trajectories to ease the stochastic gradient descent algorithm
@@ -112,37 +158,32 @@ def shuffle_and_split(np_rng, splitted_dict, batch_size, shuffle=False):
         np_rng (TYPE): A numpy random generator
         dataset (TYPE): A dictionary of observation, time, and control values
         horizon (TYPE): The horizon of interest
-        batch_size (TYPE): The size of the bactc when doing gradient descent
+        batch_size (TYPE): The size of the batch when doing gradient descent
         shuffle (bool, optional): Specify the the dataarray should be split before batching or not
 
     Yields:
         TYPE: Description
     """
     # Indexes over which the split is going to happen
-    indx = np.arange(len(splitted_dict['y']))
+    if indx is None:
+        indx = np.arange(splitted_dict['y'].shape[0])
 
     # Shuffle the indexes if requested
     if shuffle:
         np_rng.shuffle(indx)
 
-    # It might be the case that the number of split doesn't exactly matches with the
-    # number of horizon trajectories. In this case, we discard the rest of data after shuffled
-    assert batch_size <= indx.shape[0], 'The batch size should be lower than the size of dataset'
-    num_split = indx.shape[0] // batch_size
-    nb_used_data = batch_size * num_split
-    splitted_indx = np.split(indx[:nb_used_data], num_split)
-
-    # Save the total number of bactches
-    # This is useful for iterating over the dataset without throwing errors
-    yield num_split
-
-    # Now iterate through the data set
-    for idx in splitted_indx:
-        batch_dict = {k : jnp.array([v[i] for i in idx]) for k, v in splitted_dict.items()}
-        yield batch_dict
+    # Split the array with the new given indexes
+    ttraj = splitted_dict['y'].shape[0]
+    batch_dict = [ { k : v[indx[i:i+batch_size]] if i+batch_size <= ttraj else v[indx[ttraj-batch_size:]]\
+                        for k, v in splitted_dict.items()
+                    } for i in range(0, ttraj, batch_size)
+                 ]
+    num_bacthes = len(batch_dict)
+    assert ttraj // batch_size == num_bacthes or ttraj // batch_size == num_bacthes-1
+    return num_bacthes, batch_dict
 
 
-def separate_data(dataset, np_rng, ratio_train, ratio_test):
+def separate_data(dataset, np_rng, ratio_test):
     """Extract from the dataset the trajectories used when evaluating the model
        for printing the loss function evolution
 
@@ -151,7 +192,7 @@ def separate_data(dataset, np_rng, ratio_train, ratio_test):
                             time if present
         np_rng (TYPE): Numpy random generator for shuffling the data set
         ratio_test (float): The ratio of data to use for evaluating the model
-                            in terms of number of trajectory
+                            in terms of number of trajectories
 
     Returns:
         TYPE: Test dataset
@@ -163,16 +204,11 @@ def separate_data(dataset, np_rng, ratio_train, ratio_test):
     num_trajectories = len(dataset['y'])
     # Find the number of testing trajectories based on the given ratio
     num_test_trajectories = int(ratio_test * num_trajectories)
-    # Find the number of testing trajectories based on the given ratio
-    num_train_trajectories = int(ratio_train * num_trajectories)
     # Randomly pick indexes for constructing the testing dataset
     indx_test = np_rng.choice(np.arange(num_trajectories), size=num_test_trajectories, replace=False)
-    # Randomly pick indexes for constructing the training dataset
-    indx_train = np_rng.choice(np.arange(num_trajectories), size=num_train_trajectories, replace=False)
     # Build the test dataset
     dataset_test = {k : [v[i] for i in indx_test] for k, v in dataset.items()}
-    dataset_train = {k : [v[i] for i in indx_train] for k, v in dataset.items()}
-    return dataset_train, dataset_test
+    return dataset_test
 
 
 def train_model(params, train_data, outfile, improvement_cond, sde_constr):
@@ -200,19 +236,15 @@ def train_model(params, train_data, outfile, improvement_cond, sde_constr):
     trainer_params = params['training']
 
     # Load some batching parameters
-    ratio_test, ratio_train, train_batch_size, test_batch_size = \
-        [ trainer_params[k] for k in ['ratio_test', 'ratio_train', 'train_batch', 'test_batch']]
+    ratio_test, train_batch_size, test_batch_size = \
+        [ trainer_params[k] for k in ['ratio_test', 'train_batch', 'test_batch']]
 
     # SPlit the training data into train and test dataset
-    logging_train, logging_test = separate_data(train_data, m_numpy_rng, ratio_train, ratio_test)
-
-    # During training evaluation for printing, only
-    # When printing the loss, specify the number of training data set that will be used
-    train_num_batch_eval = trainer_params['train_num_batch_eval']
+    logging_test = separate_data(train_data, m_numpy_rng, ratio_test)
 
     # Initialize the model
     print('\n2) Initialize the model\n')
-    nn_params,  _loss_fn = create_loss_fn(params['model'], params['loss'],
+    nn_params,  _loss_fn = create_model_loss_fn(params['model'], params['loss'],
                                                 sde_constr=sde_constr, seed=seed)
     print('Model NN parameters: \n', nn_params)
     print('\nModel init parameters:\n', params['model'])
@@ -254,10 +286,10 @@ def train_model(params, train_data, outfile, improvement_cond, sde_constr):
             :param in_data        : A batch of the data set
         """
         # By default only differentiate with respect to params
-        grads, _ = jax.grad(_loss_fn, has_aux=True)(params, rng=rng_key, **in_data)
+        grads, featvals = jax.grad(_loss_fn, has_aux=True)(params, rng=rng_key, **in_data)
         updates, _opt_state = opt.update(grads, _opt_state, params)
         params = optax.apply_updates(params, updates)
-        return params, _opt_state
+        return params, _opt_state, featvals
 
     # Utility function for printing / displaying loss evolution
     def fill_dict(m_dict, c_dict, inner_name, fstring):
@@ -302,15 +334,15 @@ def train_model(params, train_data, outfile, improvement_cond, sde_constr):
         if epoch % trainer_params['data_split_rate'] == 0:
             tqdm.write('Splitting dataset into finite length trajectories...\n')
             splitted_train_data = split_dataset_into_finitehorizon_traj(train_data, m_numpy_rng, horizon_plan)
-            splitted_train_data_eval = split_dataset_into_finitehorizon_traj(logging_train, m_numpy_rng, horizon_plan)
             splitted_test_data_eval = split_dataset_into_finitehorizon_traj(logging_test, m_numpy_rng, horizon_plan)
+            num_test_batches, split_test = shuffle_and_split(m_numpy_rng, splitted_test_data_eval,test_batch_size, shuffle=False)
             tqdm.write('End of splitting dataset into finite length trajectories...\n')
 
         # Shuffle the entire data set at each epoch and return iterables
-        ds_train_c = shuffle_and_split(m_numpy_rng, splitted_train_data, train_batch_size, shuffle=True)
-        num_train_batches = next(ds_train_c)
+        num_train_batches, split_train = shuffle_and_split(m_numpy_rng, splitted_train_data, train_batch_size, shuffle=True)
+        iter_split_train = iter(split_train)
 
-        # Counts the number of epochs until cost does not imrpove anymore
+        # Counts the number of epochs until cost does not improve anymore
         count_epochs_no_improv += 1
 
         # Iterate on the total number of batches
@@ -320,33 +352,26 @@ def train_model(params, train_data, outfile, improvement_cond, sde_constr):
             log_data = dict()
 
             # Get the next batch of images
-            batch_current = next(ds_train_c)
+            batch_current = next(iter_split_train)
             train_rng, update_rng = jax.random.split(train_rng)
 
             if itr_count == 0:
-                batch_train_init = shuffle_and_split(m_numpy_rng, splitted_train_data_eval,
-                                                        train_batch_size, shuffle=False)
-                batch_test_init = shuffle_and_split(m_numpy_rng, splitted_test_data_eval,
-                                                        test_batch_size, shuffle=False)
-                num_train_batches_eval = next(batch_train_init)
-                num_test_batches = next(batch_test_init)
                 # Compute the loss on the entire training set
-                train_rng, eval_rng_train, eval_rng_test = jax.random.split(train_rng, 3)
-                _train_dict_init = \
-                        evaluate_loss(init_nn_params, batch_train_init, eval_rng_train, num_train_batches_eval)
-
+                train_rng, eval_rng_test = jax.random.split(train_rng)
                 # Compute the loss on the entire testing set
                 _test_dict_init = \
-                        evaluate_loss(init_nn_params, batch_test_init, eval_rng_test, num_test_batches)
+                        evaluate_loss(init_nn_params, iter(split_test), eval_rng_test, num_test_batches)
 
             # Increment the iteration count
             itr_count += 1
 
             # Update the weight of the nmodel via SGD
             update_start = time.time()
-            nn_params, opt_state = update(nn_params, opt_state, batch_current, update_rng)
+            nn_params, opt_state, _train_res = update(nn_params, opt_state, batch_current, update_rng)
             tree_flatten(opt_state)[0][0].block_until_ready()
             update_end = time.time() - update_start
+            # Include time in _train_res for uniformity with test dataset
+            _train_res['Pred. Time'] = update_end
 
             # Total elapsed compute time for update only
             if itr_count >= 5: # Remove the first few steps due to jit compilation
@@ -362,20 +387,10 @@ def train_model(params, train_data, outfile, improvement_cond, sde_constr):
                 print_str_test = '----------------------------- Eval on Test Data [epoch={} | num_batch = {}] -----------------------------\n'.format(epoch, i)
                 tqdm.write(print_str_test)
 
-                # Split / shuffle the data if needed
-                batch_train_i = shuffle_and_split(m_numpy_rng, splitted_train_data_eval,
-                                                        train_batch_size, shuffle=False)
-                batch_test_i = shuffle_and_split(m_numpy_rng, splitted_test_data_eval,
-                                                        test_batch_size, shuffle=False)
-                num_train_batches_eval = next(batch_train_i)
-                num_test_batches = next(batch_test_i)
-                train_rng, eval_rng_train, eval_rng_test = jax.random.split(train_rng, 3)
-
-                # Compute the loss on the entire training set
-                _train_res = evaluate_loss(nn_params, batch_train_i, eval_rng_train, num_train_batches_eval)
+                train_rng, eval_rng_test = jax.random.split(train_rng)
 
                 # Compute the loss on the entire testing set
-                _test_res = evaluate_loss(nn_params, batch_test_i, eval_rng_test, num_test_batches)
+                _test_res = evaluate_loss(nn_params, iter(split_test), eval_rng_test, num_test_batches)
 
                 # First time we have a value for the loss function
                 # if itr_count == 1 or (opt_variables['Loss Fy'] > _test_res['Loss Fy'] + 10000):
@@ -390,7 +405,6 @@ def train_model(params, train_data, outfile, improvement_cond, sde_constr):
                 fill_dict(log_data, _test_res, 'Test', '{:.3e}')
                 log_data_copy = copy.deepcopy(log_data)
                 fill_dict(log_data_copy, opt_variables, 'Opt. Test', '{:.3e}')
-                fill_dict(log_data_copy, _train_dict_init, 'Init Train', '{:.3e}')
                 fill_dict(log_data_copy, _test_dict_init, 'Init Test', '{:.3e}')
 
                 print_str = 'Iter {:05d} | Total Update Time {:.2e} | Update time {:.2e}\n'.format(itr_count, total_time, update_end)
@@ -416,7 +430,7 @@ def train_model(params, train_data, outfile, improvement_cond, sde_constr):
                               'total_time' : total_time,
                               'compute_time_update' : compute_time_update,
                               'opt_values' : opt_variables, 'log_data' : log_data_list,
-                              'init_losses' : (_train_dict_init, _test_dict_init),
+                              'init_losses' : _test_dict_init,
                               'training_parameters' : m_parameters_dict}
                 outfile = open(out_data_file+'.pkl', "wb")
                 pickle.dump(m_dict_res, outfile)
@@ -427,28 +441,3 @@ def train_model(params, train_data, outfile, improvement_cond, sde_constr):
 
         if last_iteration:
             break
-
-# m_numpy_rng = np.random.default_rng(0)
-# ydata = []
-# for i in range(10):
-#     traj_size = m_numpy_rng.integers(6, 9)
-#     ydata.append(m_numpy_rng.standard_normal((traj_size,3)))
-
-# ydict = {'y' : ydata}
-
-# sp_dict = split_dataset_into_finitehorizon_traj(ydict, m_numpy_rng, 5)
-
-# it_split = shuffle_and_split(m_numpy_rng, ydict, 5, 5, shuffle=True)
-
-# nval = next(it_split)
-# print(sp_dict)
-# nval['y'][1][0,:] = 0
-# print(nval)
-# print(ydict)
-# print(sp_dict)
-
-
-# print('NEXTTTTTT')
-# sp_dict['y'][0][0,:] = 0.
-# print(sp_dict['y'])
-# print(ydict)

@@ -1,5 +1,5 @@
-# rl-girsanov
-A reinforcement learning algorithm via forward-backward stochastic differential equations and Girsanov theorem
+# sde4mbrl
+A framework for learning to control via (offline) learning of stochastic differential equation's representations of the dynamics, and the cost-to-go/value function of the underlying task through Iterative solving of the generalized (and linear PDE) HJB. These two quantities are then used online for solving stochastic optimal control problem using an accelerated gradient descent MPC formulation with near-optimal initialization of the variables.
 
 ## Installation
 
