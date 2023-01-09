@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 with open("README.md", 'r') as f:
     long_description = f.read()
@@ -18,10 +18,12 @@ setup(
    author='Franck Djeumou',
    author_email='fdjeumou@utexas.edu',
    url="https://github.com/wuwushrek/sde4mbrl.git",
-   packages=['sde4mbrl'],
-   package_dir={'sde4mbrl': 'sde4mbrl/'},
-   install_requires=['numpy', 'scipy', 'matplotlib', 'tqdm', 'jupyterlab', 'ipympl',
-                     'jax>=0.3.4', 'jaxlib', 'dm-haiku', 'optax'],
+   packages= find_packages(),
+   install_requires=['numpy', 'scipy', 'matplotlib', 'tqdm', 'jax', 'dm-haiku', 'optax'], 
    tests_require=['pytest', 'pytest-cov'],
-   python_requires=">=3.7"
+   python_requires=">=3.6"
 )
+# 'jax>=0.2.28', 'jaxlib', 'dm-haiku', 'optax'
+# python_requires=">=3.7"
+# 'jupyterlab', 'ipympl'
+# 'jax>=0.2.28', 'jaxlib', 'dm-haiku', 'PolyakSGD', 'ArmijoSGD', 'pandas'

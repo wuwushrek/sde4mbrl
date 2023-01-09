@@ -1,0 +1,40 @@
+seed_trans: 10
+
+# Horizon when generating the data
+# Thus, the total number of data is num_sample * (horizon + 1)
+horizon: 5
+
+# The possible noise setting configuration
+noise_settings:
+  MeasLow: 
+    # pnoise: [0.001, 0.001] # Process noise
+    mnoise: [0.0001, 0.001] # Measurement noise
+  MeasMedium: 
+    # pnoise: [0.001, 0.001] # Process noise
+    mnoise: [0.0001, 0.003] # Measurement noise
+  MeasHigh: 
+    # pnoise: [0.001, 0.001] # Process noise
+    mnoise: [0.0005, 0.005] # Measurement noise
+
+sampling_domain_settings:
+    TopRight: 
+      lb: [0, 0]
+      ub: [0.15, 0.15]
+    Full:
+      lb: [-0.15, -0.15]
+      ub: [0.15, 0.15]
+
+# Do not regenerate data file for existing file
+regenerate: True
+
+# List of number of sample for data generation
+# Dataset are going to be generate for all the sampling and noise settings above
+num_samples: [100, 700, 2000]
+
+test_data:
+  num_samples: 100
+  mnoise: [0.0001, 0.002]
+  pnoise: null
+  domain_lb: [-0.1, -0.1]
+  domain_ub: [0.1, 0.1]
+  test_seed: 20
