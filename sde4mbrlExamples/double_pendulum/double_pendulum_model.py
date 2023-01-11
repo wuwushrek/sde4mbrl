@@ -18,8 +18,8 @@ from functools import partial
 import yaml
 
 
-class MassSpringDamper(ControlledSDE):
-    """ An SDE and ODE model of the mass spring damper system.
+class DoublePendulum(ControlledSDE):
+    """ An SDE and ODE model of the double pendulum.
         The parameters of the model are usually defined in a yaml file.
     """
     def __init__(self, params, name=None):
@@ -33,32 +33,35 @@ class MassSpringDamper(ControlledSDE):
         # This function setup the parameters of the unknown neural networks and the residual network
         self.init_residual_networks()
     
-    def vector_field(self, x, u, Fres=0.0):
-        """Compute the dynamics of the system
+    def vector_field(self, x, u, f1=0.0, f2=0.0):
+        """Compute the dynamics of the double pendulum
 
             Args:
                 x (jax.numpy.ndarray): The state of the system.
                 u (jax.numpy.ndarray): The input of the system.
-                Fres (jax.numpy.ndarray, optional): The residual force.
+                g1 (float, optional): An unknown term on the pendulum dynamics
+                g2 (float, optional): An unknown term on the pendulum dynamics
             Returns:
                 jax.numpy.ndarray: The vector field of the system.
         """
         # Get the parameters of the system
-        m = self.init_params['mass']
-        k = self.init_params['kq_coeff']
-        b = self.init_params['bqdot_coeff']
-
-        # Check if control is enabled
-        if not self.params['control']:
-            u = jnp.array([0.0])
+        m1, m2, l1, l2, gravity = self.init_params['m1'], self.init_params['m2'], self.init_params['l1'], self.init_params['l2'], self.init_params['gravity']
+        # Extract the state
+        t1, t2, w1, w2 = x
+        # Check if groundtruth
+        if self.params['ground_truth']:
+            # Compute f1 and f2 from the groundtruth
+            f1 = -(l2 / l1) * (m2 / (m1 + m2)) * (w2**2) * jnp.sin(t1 - t2) - (gravity / l1) * jnp.sin(t1)
+            f2 = (l1 / l2) * (w1**2) * jnp.sin(t1 - t2) - (gravity / l2) * jnp.sin(t2)
 
         # Compute the vector field
-        if self.params['ground_truth']:
-            xdot = jnp.array([x[1], (u[0] - k*x[0] - b*x[1])/m])
-        else:
-            xdot = jnp.array([x[1], (u[0] - k*x[0] + Fres)/m])
+        a1 = (l2 / l1) * (m2 / (m1 + m2)) * jnp.cos(t1 - t2)
+        a2 = (l1 / l2) * jnp.cos(t1 - t2)
+        g1 = (f1 - a1 * f2) / (1 - a1 * a2)
+        g2 = (f2 - a2 * f1) / (1 - a1 * a2)
 
-        return xdot
+        return jnp.array([w1, w2, g1, g2])
+
     
     def init_residual_networks(self):
         """Initialize the residual networks.
@@ -68,24 +71,30 @@ class MassSpringDamper(ControlledSDE):
             pass
 
         residual_type = self.params['residual_forces']['type']
-        if residual_type in ['linear', 'quadratic', 'cubic']:
-            num_deg = 1 if residual_type == 'linear' else 2 if residual_type == 'quadratic' else 3
-            def res_fn(x, u):
-                x1, x2 = x
-                poly_x = x if num_deg == 1 else jnp.array([x1, x2, x1*x2, x1**2, x2**2]) if num_deg == 2 else jnp.array([x1, x2, x1*x2, x1**2, x2**2, x1**3, x2**3, x1**2*x2, x1*x2**2])
-                # Get residual parameters
-                Fres_params = hk.get_parameter('Fres', shape=poly_x.shape, init=hk.initializers.RandomUniform(-1e-2, 1e-2))
-                return jnp.sum(Fres_params * poly_x)
-            self.residual = res_fn
-        elif residual_type == 'dnn':
+        if residual_type == 'dnn':
             # Get the residual network parameters
             _act_fn = self.params['residual_forces']['activation_fn']
-            self.residual_forces = hk.nets.MLP([*self.params['residual_forces']['hidden_layers'], 1],
+            self.residual_forces = hk.nets.MLP([*self.params['residual_forces']['hidden_layers'], 2],
                                                 activation = getattr(jnp, _act_fn) if hasattr(jnp, _act_fn) else getattr(jax.nn, _act_fn),
                                                 w_init=hk.initializers.RandomUniform(-1e-3, 1e-3),
                                                 name = 'Fres')
-            self.residual = lambda x, u: self.residual_forces(x)[0]
+            self.residual = lambda x, u: self.residual_forces(x)
+            return
+        # elif residual_type == 'dnn_sym':
 
+        #     # [TODO] This might not converge so to check
+        #     # Create the side information with symmetry information
+        #     _act_fn = self.params['residual_forces']['activation_fn']
+        #     self.residual_forces = hk.nets.MLP([*self.params['residual_forces']['hidden_layers'], 2],
+        #                                         activation = getattr(jnp, _act_fn) if hasattr(jnp, _act_fn) else getattr(jax.nn, _act_fn),
+        #                                         w_init=hk.initializers.RandomUniform(-1e-3, 1e-3),
+        #                                         name = 'Fres')
+        #     def residual(x, _u):
+        #         # Absoulte value of the state
+        #         xabs = jnp.abs(x)
+        #         res_val = self.residual_forces(xabs)
+        #         # We need to add the sign of the first two states
+        #         return 
 
     def prior_drift(self, x, u, extra_args=None):
         """Drift of the prior dynamics
@@ -97,29 +106,28 @@ class MassSpringDamper(ControlledSDE):
 
         # If there is no side information about the evolution, the prior is set to OU process
         if not self.params['include_side_info']:
-            return jnp.array([x[1], -x[1]]) # OU process for the second order derivative
+            return jnp.array([x[2], x[3], -x[2], -x[3]]) # OU process for the second order derivative
 
         # We set the residual to zero by default
-        return self.vector_field(x, u)
+        return self.vector_field(x, u, f1=x[1]-x[0], f2=x[0]-x[1])
     
     def posterior_drift(self, x, u, extra_args=None):
         """Drift of the posterior dynamics
         """
         if self.params['ground_truth']:
             return self.vector_field(x, u)
-        
-        # We need to build the residual terms
-        if self.params['include_side_info']:
-            Fres = self.residual(x[1:], u)
-        else:
-            Fres = self.residual(x, u)
-        # Fres = self.residual(x, u)
 
         # Check if there is side information about the evolution
         if not self.params['include_side_info']:
-            return jnp.array([x[1], Fres])
+            # Compute the residual
+            Fres = self.residual(x, u)
+            return jnp.array([x[2], x[3], Fres[0], Fres[1]])
+        
+        # Compute the residual
+        xnew = jnp.array([x[0], x[1], jnp.abs(x[2]), jnp.abs(x[3])])
+        Fres = self.residual(xnew, u)
 
-        return self.vector_field(x, u, Fres)
+        return self.vector_field(x, u, f1=Fres[0], f2=Fres[1])
     
     def prior_diffusion(self, x, extra_args=None):
         """Diffusion term of the prior dynamics
@@ -133,11 +141,7 @@ class MassSpringDamper(ControlledSDE):
         if self.params['diffusion_type'] == 'constant':
             amp_noise = self.params['amp_noise'] if self.params['include_side_info'] else self.params['nosi_amp_noise']
             return jnp.array(amp_noise)
-        if self.params['diffusion_type'] == 'exp':
-            # amp_noise = self.params['amp_noise'] if self.params['include_side_info'] else self.params['nosi_amp_noise']
-            return jnp.array([0.0001, (1 - jnp.exp(-1000*jnp.sum(x**2)))*0.01 ])
 
-        
         raise ValueError('Unknown diffusion type')
 
 
@@ -173,7 +177,7 @@ def load_predictor_function(learned_params_dir, prior_dist=False, modified_param
     params_model = update_params(_model_params, modified_params)
 
     # Create the model
-    _, m_sampling = create_sampling_fn(params_model, sde_constr=MassSpringDamper, prior_sampling=prior_dist)
+    _, m_sampling = create_sampling_fn(params_model, sde_constr=DoublePendulum, prior_sampling=prior_dist)
 
     print(params_model)
 
@@ -190,7 +194,7 @@ def load_learned_model(model_path, horizon=1, num_samples=1, ufun=None, prior_di
 
     # Define the control function
     if ufun is None:
-        ufun = lambda *x : 0.0
+        ufun = lambda *x : jnp.array([0.0])
     
     @partial(jax.jit, backend='cpu')
     def sampling_jit(x, rng):
@@ -218,7 +222,7 @@ def load_data_generator(model_dir, noise_info={}, horizon=1, ufun=None):
     modified_params['ground_truth'] = True
     modified_params['control'] = False if ufun is None else True
     modified_params['diffusion_type'] = 'zero' if 'process_noise' not in noise_info else 'constant'
-    modified_params['nosi_amp_noise'] = noise_info['process_noise'] if 'process_noise' in noise_info else [0.0, 0.0]
+    modified_params['nosi_amp_noise'] = noise_info['process_noise'] if 'process_noise' in noise_info else [0.0, 0.0, 0.0, 0.0]
 
     # Define the control function
     if ufun is None:
@@ -273,7 +277,6 @@ def load_data_generator(model_dir, noise_info={}, horizon=1, ufun=None):
     
     return sampling_fn_jit, data_generator
 
-
 def train_sde(yaml_cfg_file, model_type, train_data, test_data, output_file=None):
     """ Main function to train the SDE
 
@@ -287,12 +290,14 @@ def train_sde(yaml_cfg_file, model_type, train_data, test_data, output_file=None
     # Load the yaml file
     cfg_train = load_yaml(yaml_cfg_file)
 
-    # Get the horizon from the dataset transitions
-    cfg_train['sde_loss']['horizon'] = train_data[0][1].shape[0] if 'nesde' in model_type else 1
+    # Get the horizon from the dataset transition
+    # not_one_step_split = 'nesde' in model_type
+    # not_one_step_split = True
+    # cfg_train['sde_loss']['horizon'] = train_data[0][1].shape[0] if not_one_step_split else 1
     
     # Specify the dimension of the problem
-    cfg_train['model']['n_x']  = 2
-    cfg_train['model']['n_y']  = 2
+    cfg_train['model']['n_x']  = 4
+    cfg_train['model']['n_y']  = 4
     cfg_train['model']['n_u']  = 1
 
     # Modify the model according to the type
@@ -322,7 +327,7 @@ def train_sde(yaml_cfg_file, model_type, train_data, test_data, output_file=None
         raise ValueError("Unknown model type: " + model_type)
         
     # # Build the full data
-    # if 'nesde' in model_type:
+    # if not_one_step_split:
     #     is_data_trajectory = False
     #     full_data = { 'y' : np.array([x for x, _ in train_data]), 'u' : np.array([u for _, u in train_data])}
     #     test_traj_data = { 'y' : np.array([x for x, _ in test_data]), 'u' : np.array([u for _, u in test_data])}
@@ -330,6 +335,7 @@ def train_sde(yaml_cfg_file, model_type, train_data, test_data, output_file=None
     #     is_data_trajectory = True
     #     full_data = [{ 'y' : x, 'u' : u} for x, u in train_data]
     #     test_traj_data = [{ 'y' : x, 'u' : u} for x, u in test_data]
+    
     full_data = [{ 'y' : x, 'u' : u} for x, u in train_data]
     test_traj_data = [{ 'y' : x, 'u' : u} for x, u in test_data]
 
@@ -364,7 +370,7 @@ def train_sde(yaml_cfg_file, model_type, train_data, test_data, output_file=None
         # return opt_var['totalLoss'] > test_res['totalLoss']
 
     # Train the model
-    train_model(cfg_train, full_data, test_traj_data, output_file, _improv_cond, MassSpringDamper)
+    train_model(cfg_train, full_data, test_traj_data, output_file, _improv_cond, DoublePendulum)
 
 
 ################# Bunch of commanda line functions to train the models and generate data #################
@@ -471,7 +477,7 @@ def gen_traj_yaml(model_dir, data_gen_dir):
     print(_cfg_t)
     gen_traj(model_dir, outfile='MSD_TestData', num_trans = _cfg_t['num_samples'], domain_lb = _cfg_t['domain_lb'], 
                 domain_ub = _cfg_t['domain_ub'], pnoise = _cfg_t['pnoise'], mnoise = _cfg_t['mnoise'], 
-                horizon = cfg_data_gen.get('horizon', 1), seed_trans= _cfg_t['test_seed'], regenerate=True
+                horizon = _cfg_t['horizon'], seed_trans= _cfg_t['test_seed'], regenerate=True
     )
 
 # Load a pkl file
@@ -535,11 +541,11 @@ if __name__ == '__main__':
     import argparse
     
     # Create the parser
-    parser = argparse.ArgumentParser(description='Mass Spring Damper Model, Data Generator, and Trainer')
+    parser = argparse.ArgumentParser(description='Double Pendulum, Data Generator, and Trainer')
 
     # Add the arguments
     parser.add_argument('--fun', type=str, default='gen_traj', help='The function to run')
-    parser.add_argument('--model_dir', type=str, default='mass_spring_damper.yaml', help='The model configuration and groundtruth file')
+    parser.add_argument('--model_dir', type=str, default='double_pendulum.yaml', help='The model configuration and groundtruth file')
     parser.add_argument('--data_gen_cfg', type=str, default='data_generation.yaml', help='The data generation configuration file')
     parser.add_argument('--model_type', type=str, default='node_bboxes', help='The model train: node_bboxes, nesde_bboxes, node_phys, nesde_phys')
     parser.add_argument('--data', type=str, default='', help='Specific data file to train on')

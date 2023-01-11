@@ -132,7 +132,7 @@ def split_trajectories_into_transitions(data, horizon):
     return res_data
 
 
-def train_model(params, train_data, test_data, outfile, improvement_cond, sde_constr, is_data_trajectory=True, **extra_args_sde_constr):
+def train_model(params, train_data, test_data, outfile, improvement_cond, sde_constr, **extra_args_sde_constr):
     """TODO: Add extra args for the dynamics in particular
 
     Args:
@@ -174,10 +174,22 @@ def train_model(params, train_data, test_data, outfile, improvement_cond, sde_co
     loss_fn = jax.jit(_loss_fn)
 
     # Check if the data is a trajectory or a set of transitions
-    if is_data_trajectory:
+    if train_data[0]['u'].shape[0] != params['model']['horizon']:
+        assert train_data[0]['u'].shape[0] > params['model']['horizon'], 'The horizon is too large to split the trajectory'
+        print ('[WARNING] The train data has a different horizon than the model. It will be split into transitions')
         # Convert the data into transitions
         train_data = split_trajectories_into_transitions(train_data, params['model']['horizon'])
+    else:
+        # Convert the data into a dictionary
+        train_data = { k : np.array([_data[k] for _data in train_data]) for k in train_data[0].keys()}
+    
+    if test_data[0]['u'].shape[0] != params['model']['horizon']:
+        assert test_data[0]['u'].shape[0] > params['model']['horizon'], 'The horizon is too large to split the trajectory'
+        print ('[WARNING] The test data has a different horizon than the model. It will be split into transitions')
         test_data = split_trajectories_into_transitions(test_data, params['model']['horizon'])
+    else:
+        # Convert the data into a dictionary
+        test_data = { k : np.array([_data[k] for _data in test_data]) for k in test_data[0].keys()}
 
     # Check if the train data size with respect to the batch size
     if train_data['y'].shape[0] < train_batch_size:
