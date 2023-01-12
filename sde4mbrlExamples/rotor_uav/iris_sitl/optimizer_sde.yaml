@@ -1,0 +1,131 @@
+# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python sde_rotor_model.py --fun train_sde --cfg iris_sitl/optimizer_sde.yaml --out hexa_lin_noise
+# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python sde_rotor_model.py --fun gen_traj --cfg data_generation.yaml
+
+# The directory containing my_models and my_data
+vehicle_dir: ~/Documents/sde4mbrl/sde4mbrlExamples/rotor_uav/iris_sitl
+
+# Training and testing data trajectory
+data_dir: trajs.pkl
+
+# # If few parameters were learnt using static matching of model of vector field and finite difference, we specify its name here
+learned_nominal: prior_iris_linear.yaml # a name of a learned .yaml file -> Generate this file using optimizer_prior or comment it if you don't want to learn a prior
+
+# Model parameters
+model:
+  # Diffusion term -> Ignore some of the state cause the dynamics are known
+  # x: 0, y: 1, z: 2, vx: 3, vy: 4, vz: 5, qw: 6, qx: 7, qy: 8, qz: 9, wx: 10, wy: 11, wz: 12
+  ignore_diff_indx: [3,4,5,10,11,12] # Only consider the following noise when evaluating the kl divergence
+  
+  # This is not used when learned_nominal is not null
+  # This means that, when learned_nominal is null, these values are used to initialize the corresponding parameters in the model.
+  # Those parameters are later trained on the data
+  # When learned_nominal is not null, then it is .yaml file in my_models that contains static lerned parameters
+  # This parameters are definitely not accurate except for the mass which was obtained in Gazebo
+  init_params:
+    mass: 1.5
+    gravity: 9.81
+    Ixx: 0.025
+    Iyy: 0.025
+    Izz: 0.05
+    fm_model: linear # linear, quadratic, cubic
+
+  # The type of diffusion term
+  diffusion_type: constant # zero and more to come
+
+  # # Low assumed noise on the process
+  # amp_noise_vel: 0.001 # Velocity diffusion
+  # amp_noise_angular_vel: 0.001 # Angular speed diffusion
+
+  # # High assumed noise on the process
+  # amp_noise_vel: 0.01 # Velocity diffusion
+  # amp_noise_angular_vel: 0.01 # Angular speed diffusion
+
+  # High High assumed noise on the process
+  amp_noise_vel: 0.05 # Velocity diffusion
+  amp_noise_angular_vel: 0.1 # Angular speed diffusion
+
+  # Ground effect learning enabled?
+  ground_effect: False # True -> tb
+
+  # Aerodynamic drag enabled?
+  aero_drag_effect: True
+
+  # Residual term enabled?
+  residual_forces:
+    hidden_layers: [16, ]
+    activation_fn: 'tanh'
+
+  residual_moments:
+    hidden_layers: [16, ]
+    activation_fn: 'tanh'
+  
+  # Project some of the parameters on the nonnegative domain
+  noneg_params: ['aero_kdx', 'aero_kdy', aero_'kdz', 'aero_kh', 'mass', 'Ixx', 'Iyy', 'Izz']
+
+  # Define the parameters for the SDE solver
+  sde_solver: 'euler_maruyama'
+
+  # Stepsize for integration
+  stepsize: 0.01
+
+  # These values are changed in the code
+  num_particles: 1
+  horizon: 1
+
+sde_loss:
+  seed: 1             # The initial seed
+  horizon: 50         # The horizon to use when training the SDE -> how far to integrate and do loss computation
+  pen_params: 1.      # Relative importance of weight penalization with respect to kl div loss
+  num_particles: 1   # Number of particles when fitting the SDE -> If different to the default model num_particles
+  default_weights: 1.0e-6       # Importance of the non special parameters
+  kl: 0           # Importance of loss on the kl divergence
+  logprob: 10.0      # Importance on the weight of the logprob
+  special_parameters_pen: # Deviation from initial guess in init_params
+    # aero_kdx: 1.0e-5
+    # aero_kdy: 1.0e-5
+    # aero_kdz: 1.0e-5
+    # aero_kh: 1.0e-5
+    mass: 10.0
+    Ixx: 2.0
+    Iyy: 2.0
+    Izz: 2.0
+
+# Convergence values for certain parameters
+# special_parameters_val:
+#   mass: 1.5
+#   Ixx: 0.025
+
+# Default NN weights values when penalization
+# default_parameters_val: 0.
+  
+
+sde_optimizer:
+  - name: scale_by_adam
+    # params:
+    #   b1: 0.999
+    #   b2: 0.9999
+  # - name: add_decayed_weights
+  #   params:
+  #     weight_decay: 0.001
+  - name: exponential_decay
+    scheduler: True
+    params:
+      init_value: -0.1 # Initial learning rate (Negative value for minimization)
+      transition_steps: 30000 # Basically the maximum number of gradient steps
+      decay_rate: 0.0 # Typically (end_value / init_value) if end_value is expected at end
+  - name: adaptive_grad_clip
+    params:
+      clipping: 0.01
+  
+
+# Training parameters
+sde_training:
+  train_batch: 256 # The mini batch size for the training dataset
+  test_batch: 512 # The mini batch size for the training dataset
+  nepochs: 1000 # The number of epochs (full pass over the training dataset)
+  patience: 2000 # The number of epochs after which to stop the learningif no improvement in solution
+  no_improvement_bound: 0.01 # The bound to detect no improvement in the loss
+  test_freq: 50 # Number of gradient steps after which to evaluate and display losses
+  save_freq: 500 # Number of gradient steps after which to save the current losses+nn
+  # Additional parameters to display when showing loss evolution
+  show_param: ['aero_kdx', 'aero_kdy', 'aero_kdz', 'aero_kh',  'mass', 'Ixx', 'Iyy', 'Izz']
