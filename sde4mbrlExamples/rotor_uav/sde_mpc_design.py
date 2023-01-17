@@ -191,7 +191,8 @@ def augmented_cost(u_params, _multi_sampling_cost, _cost_params, _time_steps):
     # Add the slew rate penalty
     cost_u_slew_rate = jnp.array(0.)
     if 'u_slew_coeff' in _cost_params:
-        cost_u_slew_rate = (jnp.square(u_params[1:] - u_params[:-1]) / _time_steps[:-1]) * _cost_params['u_slew_coeff']
+        __time_steps = _time_steps[:-1].reshape(-1, 1)
+        cost_u_slew_rate = (jnp.square(u_params[1:, :4] - u_params[:-1, :4]) / __time_steps) * jnp.array(_cost_params['u_slew_coeff']).reshape(1, -1)
         cost_u_slew_rate = jnp.sum(cost_u_slew_rate)
 
     # State slew rate

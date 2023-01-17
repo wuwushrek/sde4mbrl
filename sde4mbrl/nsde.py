@@ -737,8 +737,9 @@ def create_online_cost_sampling_fn(params_model,
         x = x_true[state_idx]
         # diff_x should always be less than 0
         diff_x = jnp.concatenate((x - state_ub, state_lb - x))
+        _penalty_coeff = jnp.concatenate((penalty_coeff, penalty_coeff))
         #[TODO Franck] Maybe mean/sum the error instead of doing a mean over states
-        return jnp.sum(jnp.where( diff_x > 0, 1., 0.) * jnp.square(diff_x) * penalty_coeff)
+        return jnp.sum(jnp.where( diff_x > 0, 1., 0.) * jnp.square(diff_x) * _penalty_coeff)
 
     def constr_cost_withprox(x_true, slack_x):
         """ With proximal constraint on the slack variable -> smooth norm 2 regularization

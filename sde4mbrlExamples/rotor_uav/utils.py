@@ -173,6 +173,22 @@ def enu_to_ned_z(z):
     """
     return -z
 
+# def ned2enu(x):
+#     return jnp.concatenate((ned_to_enu_position(x[:3], jnp),
+#                             ned_to_enu_position(x[3:6],jnp),
+#                             ned_to_enu_orientation(x[6:10], jnp),
+#                             frd_to_flu_conversion(x[10:], jnp)
+#                             )
+#             )
+
+def enu2ned(x, array_lib=np):
+    return array_lib.concatenate((enu_to_ned_position(x[:3], array_lib),
+                            enu_to_ned_position(x[3:6],array_lib),
+                            enu_to_ned_orientation(x[6:10], array_lib),
+                            flu_to_frd_conversion(x[10:], array_lib)
+                            )
+            )
+
 ned_to_enu_position = enu_to_ned_position
 
 ned_to_enu_orientation = enu_to_ned_orientation

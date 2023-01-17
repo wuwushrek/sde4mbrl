@@ -8,7 +8,7 @@ vehicle_dir: ~/Documents/sde4mbrl/sde4mbrlExamples/rotor_uav/iris_sitl
 data_dir: trajs.pkl
 
 # # If few parameters were learnt using static matching of model of vector field and finite difference, we specify its name here
-learned_nominal: prior_iris_linear.yaml # a name of a learned .yaml file -> Generate this file using optimizer_prior or comment it if you don't want to learn a prior
+learned_nominal: prior_iris_cubic.yaml # a name of a learned .yaml file -> Generate this file using optimizer_prior or comment it if you don't want to learn a prior
 
 # Model parameters
 model:
@@ -32,17 +32,17 @@ model:
   # The type of diffusion term
   diffusion_type: constant # zero and more to come
 
-  # # Low assumed noise on the process
-  # amp_noise_vel: 0.001 # Velocity diffusion
-  # amp_noise_angular_vel: 0.001 # Angular speed diffusion
+  # Low assumed noise on the process
+  amp_noise_vel: 0.001 # Velocity diffusion
+  amp_noise_angular_vel: 0.001 # Angular speed diffusion
 
   # # High assumed noise on the process
   # amp_noise_vel: 0.01 # Velocity diffusion
   # amp_noise_angular_vel: 0.01 # Angular speed diffusion
 
-  # High High assumed noise on the process
-  amp_noise_vel: 0.05 # Velocity diffusion
-  amp_noise_angular_vel: 0.1 # Angular speed diffusion
+  # # High High assumed noise on the process
+  # amp_noise_vel: 0.05 # Velocity diffusion
+  # amp_noise_angular_vel: 0.1 # Angular speed diffusion
 
   # Ground effect learning enabled?
   ground_effect: False # True -> tb
