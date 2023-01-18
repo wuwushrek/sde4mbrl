@@ -14,9 +14,10 @@ import os, sys
 
 import yaml
 
-from mbrl_lib_utils import save_model_and_config, load_model_and_config, populate_replay_buffers
+from mbrl_lib_utils import save_model_and_config, \
+    load_model_and_config, populate_replay_buffers, ProgressBarCallback
 
-device_str = 'cpu'
+device_str = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
 device = torch.device(device_str)
 
@@ -26,7 +27,7 @@ generator = torch.Generator(device=device)
 generator.manual_seed(seed)
 
 # Construct and populate the replay buffers
-data_config_file_name = 'MSD_MeasLow_Full_100_config.yaml'
+data_config_file_name = 'MSD_MeasLow_Full_2000_config.yaml'
 
 data_path = os.path.abspath(os.path.join(os.path.curdir, 'my_data'))
 with open(os.path.abspath(os.path.join(data_path, data_config_file_name))) as f:
@@ -68,6 +69,13 @@ cfg_dict = {
     # dynamics model configuration
     "obs_shape" : (2,),
     "action_shape" : (0,),
+    "trainer_setup" : {
+        "optim_lr" : 0.001,
+        "weight_decay" : 5e-5,
+        "num_epochs" : 200,
+        "patience" : 200,
+        "batch_size" : 32,
+    },
     "dynamics_model": {
         "model" : {
             "_target_": "mbrl.models.GaussianMLP",
@@ -101,16 +109,26 @@ dynamics_model.update_normalizer(train_buffer.get_all()) # Normalizer gets calle
 
 # Train the model
 
-batch_size = 32
-
 train_dataset, _ = common_utils.get_basic_buffer_iterators(
-    train_buffer, batch_size, 0, ensemble_size=num_members, shuffle_each_epoch=True)
+    train_buffer, cfg['trainer_setup']['batch_size'], 0, ensemble_size=num_members, shuffle_each_epoch=True)
 val_dataset, _ = common_utils.get_basic_buffer_iterators(
-    test_buffer, batch_size, 0, ensemble_size=1)
+    test_buffer, cfg['trainer_setup']['batch_size'], 0, ensemble_size=1)
 
-trainer = models.ModelTrainer(dynamics_model, optim_lr=0.001, weight_decay=5e-5)
+pbar = ProgressBarCallback(cfg['trainer_setup']['num_epochs'])
+
+trainer = models.ModelTrainer(
+                dynamics_model, 
+                optim_lr=cfg['trainer_setup']['optim_lr'], 
+                weight_decay=cfg['trainer_setup']['weight_decay']
+            )
+
 train_losses, val_losses = trainer.train(
-    train_dataset, val_dataset, num_epochs=1000, patience=200)
+                                train_dataset, 
+                                val_dataset, 
+                                num_epochs=cfg['trainer_setup']['num_epochs'], 
+                                patience=cfg['trainer_setup']['patience'], 
+                                callback=pbar.progress_bar_callback
+                            )
 
 # Save the learned model
 experiment_name = 'gaussian_mlp_ensemble' + '_' +  data_config_file_name[:data_config_file_name.index('_config')]

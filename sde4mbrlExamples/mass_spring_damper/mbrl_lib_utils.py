@@ -6,6 +6,7 @@ import mbrl.util.common as common_utils
 
 import torch
 import numpy as np
+from tqdm import tqdm
 
 def save_model_and_config(model, config, save_dir):
     """
@@ -151,3 +152,16 @@ def generate_sample_trajectories(init_state, num_particles, dynamics_model, gene
             sample_trajectories = torch.concatenate((sample_trajectories, next_obs.reshape(num_particles, 1, -1)), axis=1)
 
     return sample_trajectories
+
+class ProgressBarCallback(tqdm):
+    
+    def __init__(self, num_training_epochs) -> None:
+        super().__init__()
+        self.total = num_training_epochs
+    
+    def progress_bar_callback(self, model, tota_calls_train, epoch, train_loss, val_score, best_val_score):
+        if epoch >= self.total:
+            self.close()
+            return
+        else:
+            self.update()
