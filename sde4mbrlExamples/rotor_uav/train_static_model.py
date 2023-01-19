@@ -191,7 +191,7 @@ def init_data(log_dir, cutoff_freqs, force_filtering=False):
     tqdm.write('Loading data from the ulog file..')
 
     # In static condition we want to avoid ground effect
-    outlier_cond = lambda d: d['z'] > 0.4
+    outlier_cond = lambda d: d['z'] > 0.1
     log_datas = parse_ulog(log_dir, outlier_cond=outlier_cond)
 
     if len(log_datas) == 0:

@@ -408,10 +408,10 @@ class SDERotorModel(ControlledSDE):
 
         # Now if can include more complex noise mode if requested
         if self.params['diffusion_type'] == 'constant':
-            noise_vel = self.params['amp_noise_vel']
-            noise_ang_vel = self.params['amp_noise_angular_vel']
-            mag_noise = set_vel(mag_noise, jnp.array([noise_vel, noise_vel, noise_vel]))
-            mag_noise = set_ang_vel(mag_noise, jnp.array([noise_ang_vel, noise_ang_vel, noise_ang_vel]))
+            noise_vel = jnp.array(self.params['amp_noise_vel'])
+            noise_ang_vel = jnp.array(self.params['amp_noise_angular_vel'])
+            mag_noise = set_vel(mag_noise, noise_vel)
+            mag_noise = set_ang_vel(mag_noise, noise_ang_vel)
         elif self.params['diffusion_type'] == 'zero':
             mag_noise = set_vel(mag_noise, jnp.zeros(3))
             mag_noise = set_ang_vel(mag_noise, jnp.zeros(3))
