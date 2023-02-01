@@ -14,6 +14,7 @@ import os, sys
 
 import yaml
 
+sys.path.append('../../mbrl_lib_utils')
 from mbrl_lib_utils import save_model_and_config, \
     load_model_and_config, populate_replay_buffers, ProgressBarCallback
 

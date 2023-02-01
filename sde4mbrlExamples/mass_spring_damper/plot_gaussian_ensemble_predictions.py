@@ -1,9 +1,11 @@
-from mbrl_lib_utils import save_model_and_config, load_model_and_config, generate_sample_trajectories
-
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import sys, os
+
+sys.path.append('../../mbrl_lib_utils')
+from mbrl_lib_utils import save_model_and_config, \
+    load_model_and_config, populate_replay_buffers, generate_sample_trajectories, ProgressBarCallback
 
 from mass_spring_model import load_data_generator
 
