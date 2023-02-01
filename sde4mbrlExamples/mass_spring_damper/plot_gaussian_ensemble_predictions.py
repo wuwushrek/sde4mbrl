@@ -4,8 +4,9 @@ import matplotlib.pyplot as plt
 import sys, os
 
 sys.path.append('../../mbrl_lib_utils')
-from mbrl_lib_utils import save_model_and_config, \
-    load_model_and_config, populate_replay_buffers, generate_sample_trajectories, ProgressBarCallback
+from mbrlLibUtils.save_and_load_models import save_model_and_config, load_model_and_config
+    
+from mbrlLibUtils.replay_buffer_utils import generate_sample_trajectories
 
 from mass_spring_model import load_data_generator
 
@@ -13,10 +14,10 @@ import jax
 
 # Setup torch stuff
 device_str = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+device_str = 'cpu'
 device = torch.device(device_str)
 seed = 42
-generator = torch.Generator(device=device)
-generator.manual_seed(seed)
+
 
 seed_rng = jax.random.PRNGKey(seed)
 
@@ -47,8 +48,17 @@ gtruth_data = np.array(gtruth_data)[:-1, :]
 
 # Generate the learned model predictions
 num_particles = 200
+generator = torch.Generator(device=dynamics_model_100.device)
+
+generator.manual_seed(seed)
 sample_trajectories_100 = generate_sample_trajectories(init_state, num_particles, dynamics_model_100, generator, time_horizon=time_horizon, device=device).cpu().numpy()
+
+generator = torch.Generator(device=dynamics_model_700.device)
+generator.manual_seed(seed)
 sample_trajectories_700 = generate_sample_trajectories(init_state, num_particles, dynamics_model_700, generator, time_horizon=time_horizon, device=device).cpu().numpy()
+
+generator = torch.Generator(device=dynamics_model_2000.device)
+generator.manual_seed(seed)
 sample_trajectories_2000 = generate_sample_trajectories(init_state, num_particles, dynamics_model_2000, generator, time_horizon=time_horizon, device=device).cpu().numpy()
 
 # Post-process the predictions
