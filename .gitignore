@@ -130,6 +130,10 @@ dmypy.json
 
 .vscode/*
 
+*.pkl
+*.pickle
+*.pth
+
 # Example data files
 sde4mbrlExamples/mass_spring_damper/my_models/*.pkl
 sde4mbrlExamples/mass_spring_damper/my_models/*.txt
