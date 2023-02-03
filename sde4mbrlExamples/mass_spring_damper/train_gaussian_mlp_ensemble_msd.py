@@ -62,58 +62,13 @@ ax.plot(test_obs[:,0], test_obs[:,1], 'x', markersize=4, color='red', label='Tes
 ax.legend(fontsize=15)
 plt.show()
 
-# ReplayBuffer generates its own training/validation split, but we probably want to
-# keep our own manually generated split, so instead we use two replay buffers. 
-
-# Build the ensemble of Gaussian MLPs
-cfg_dict = {
-    # dynamics model configuration
-    "obs_shape" : (2,),
-    "action_shape" : (0,),
-    "trainer_setup" : {
-        "optim_lr" : 0.001,
-        "weight_decay" : 5e-5,
-        "num_epochs" : 5000,
-        "num_steps_per_epoch" : 10,
-        "patience" : 200,
-        "batch_size" : 32,
-    },
-    "dynamics_model": {
-        "model" : {
-            "_target_": "mbrl.models.GaussianMLP",
-            "device": device_str,
-            "num_layers": 3,
-            "ensemble_size": 5,
-            "hid_size": 64,
-            "in_size": 2,
-            "out_size": 2,
-            "deterministic": False,
-            # "propagation_method": "fixed_model",
-            "activation_fn_cfg": {
-                "_target_": "torch.nn.SiLU",
-                # "negative_slope": 0.01
-        }
-        }
-    },
-    # options for training the dynamics model
-    "algorithm": {
-        "learned_rewards": False,
-        "target_is_delta": True,
-        "normalize": True,
-    },
-    "overrides": {
-    }
-}
-cfg = omegaconf.OmegaConf.create(cfg_dict)
-
-# train_buffer.obs.shape[-1:], train_buffer.action.shape[-1:])
+from config.gaussian_mlp_ensemble_msd_config import ensemble_cfg as cfg
 dynamics_model = common_utils.create_one_dim_tr_model(cfg, cfg['obs_shape'], cfg['action_shape'])
 dynamics_model.update_normalizer(train_buffer.get_all()) # Normalizer gets called automatically in dynamics_model._process_batch()
 
 # Train the model
-
 train_dataset, _ = common_utils.get_basic_buffer_iterators(
-    train_buffer, cfg['trainer_setup']['batch_size'], 0, ensemble_size=cfg_dict['dynamics_model']['model']['ensemble_size'], shuffle_each_epoch=True)
+    train_buffer, cfg['trainer_setup']['batch_size'], 0, ensemble_size=cfg['dynamics_model']['model']['ensemble_size'], shuffle_each_epoch=True)
 val_dataset, _ = common_utils.get_basic_buffer_iterators(
     test_buffer, cfg['trainer_setup']['batch_size'], 0, ensemble_size=1)
 
