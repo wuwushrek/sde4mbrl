@@ -1,0 +1,43 @@
+# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python mass_spring_model.py --fun gen_traj --data_gen_cfg data_generation.yaml
+
+seed_trans: 10
+
+# Horizon when generating the data
+# Thus, the total number of data is num_sample * (horizon + 1)
+horizon: 500 # 5 second trajectories
+
+# The possible noise setting configuration
+noise_settings:
+  MeasLow: 
+    # pnoise: [0.001, 0.001] # Process noise
+    mnoise: [0.001, 0.005] # Measurement noise
+  MeasHigh: 
+    # pnoise: [0.001, 0.001] # Process noise
+    mnoise: [0.005, 0.01] # Measurement noise
+  MeasLowProcNoise: 
+    pnoise: [0.001, 0.005] # Process noise
+    mnoise: [0.001, 0.005] # Measurement noise
+
+
+sampling_domain_settings:
+    TopRight: 
+      lb: [0.1, 0.05]
+      ub: [0.1, 0.15]
+    FullSpace: 
+      lb: [-0.1, -0.1]
+      ub: [0.1, 0.1]
+
+# Do not regenerate data file for existing file
+regenerate: True
+
+# List of number of sample for data generation
+# Dataset are going to be generate for all the sampling and noise settings above
+num_samples: [5, 10]
+
+test_data:
+  num_samples: 10
+  mnoise: [0.001, 0.005]
+  pnoise: null
+  domain_lb: [-0.1, -0.1]
+  domain_ub: [0.1, 0.1]
+  test_seed: 20

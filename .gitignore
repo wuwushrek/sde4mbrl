@@ -140,6 +140,7 @@ sde4mbrlExamples/mass_spring_damper/my_models/*.txt
 sde4mbrlExamples/mass_spring_damper/my_data/*.pkl
 sde4mbrlExamples/mass_spring_damper/my_data/*.yaml
 sde4mbrlExamples/mass_spring_damper/my_data/figures/*.png
+sde4mbrlExamples/mass_spring_damper/my_data/density_dataset/*.yaml
 
 sde4mbrlExamples/double_pendulum/my_models/*.pkl
 sde4mbrlExamples/double_pendulum/my_models/*.txt
