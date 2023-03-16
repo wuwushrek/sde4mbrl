@@ -83,12 +83,14 @@ def generate_sample_trajectories(init_state, num_particles, dynamics_model, gene
 
     # act = torch.zeros((num_particles,0), device=device)
 
+    sample_trajectories = model_state['obs'].reshape(num_particles, 1, -1)
+
     for t in range(time_horizon):
         with torch.no_grad():
             next_obs, _, _, model_state = dynamics_model.sample(ufun(model_state), model_state, rng=generator)
-        if t == 0:
-            sample_trajectories = next_obs.reshape(num_particles, 1, -1)
-        else:
-            sample_trajectories = torch.concatenate((sample_trajectories, next_obs.reshape(num_particles, 1, -1)), axis=1)
+        # if t == 0:
+        #     sample_trajectories = torch.concatenate((initial_obs_batch.reshape(num_particles, 1, -1), next_obs.reshape(num_particles, 1, -1)), axis=1) #next_obs.reshape(num_particles, 1, -1)
+        # else:
+        sample_trajectories = torch.concatenate((sample_trajectories, next_obs.reshape(num_particles, 1, -1)), axis=1)
 
     return sample_trajectories

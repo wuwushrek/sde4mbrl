@@ -141,41 +141,41 @@ curve_plot_style:
 #   dpi: 500
 
 
-############################ Uncertainty mesh plots #################################
-#####################################################################################
+# ############################ Uncertainty mesh plots #################################
+# #####################################################################################
 
-# Format for learned models to plot XX__MSD_XX_XX_XX
-# For example nestde__MSD_MeasLow_TopRight_5 according to the name of the learned models
-files2plot: 'XX__MSD_XX_XX_XX'
+# # Format for learned models to plot XX__MSD_XX_XX_XX
+# # For example nestde__MSD_MeasLow_TopRight_5 according to the name of the learned models
+# files2plot: 'XX__MSD_XX_XX_XX'
 
-# The list of models to plot in the configuration (usually a grid) they need to be plotted
-fig_args:
-  # Number of rows is automatically 2 for these uncertainty plots
-  figsize: [14, 8]
-  ncols: 3
-  sharex: True
-  sharey: True
-  constrained_layout: True
+# # The list of models to plot in the configuration (usually a grid) they need to be plotted
+# fig_args:
+#   # Number of rows is automatically 2 for these uncertainty plots
+#   figsize: [14, 8]
+#   ncols: 3
+#   sharex: True
+#   sharey: True
+#   constrained_layout: True
 
 
-plot_configs:
-  # - value: ['nesde','MeasLow','TopRight','5']
-  #   title: 'Low Meas Noise'
-  - value: ['gaussian_mlp_ensemble', 'MeasLow','TopRight','5']
-    title: 'Gaussian Ensemble'
-  - value: ['node', 'MeasLow','TopRight','5']
-    title: 'Neural ODE'
-  - value: ['nesde', 'MeasLow','TopRight','5']
-    title: 'Neural SDE'
-  # - value: ['nesde','MeasHigh','TopRight','5']
-  #   title: 'High Meas Noise'
-  # - value: ['nesde','MeasLowProcNoise','TopRight','5']
-  #   title: 'Meas + Process Noise'
-  #   title: 'Density Neural net'
+# plot_configs:
+#   # - value: ['nesde','MeasLow','TopRight','5']
+#   #   title: 'Low Meas Noise'
+#   - value: ['gaussian_mlp_ensemble', 'MeasLow','TopRight','5']
+#     title: 'Gaussian Ensemble'
+#   - value: ['node', 'MeasLow','TopRight','5']
+#     title: 'Neural ODE'
+#   - value: ['nesde', 'MeasLow','TopRight','5']
+#     title: 'Neural SDE'
+#   # - value: ['nesde','MeasHigh','TopRight','5']
+#   #   title: 'High Meas Noise'
+#   # - value: ['nesde','MeasLowProcNoise','TopRight','5']
+#   #   title: 'Meas + Process Noise'
+#   #   title: 'Density Neural net'
 
-save_config:
-  fname: 'uncertainty_nesde_topright_5.png'
-  dpi: 500
+# save_config:
+#   fname: 'uncertainty_nesde_topright_5.png'
+#   dpi: 500
 
 # # The list of models to plot in the configuration (usually a grid) they need to be plotted
 # fig_args:
@@ -224,61 +224,61 @@ save_config:
 
 
 
-# ############################ State evolution plots ###################################
-# ######################################################################################
+############################ State evolution plots ###################################
+######################################################################################
 
-# horizon_prediction: 200
-# num_particles: 1000
+horizon_prediction: 200
+num_particles: 1000
 
-# # The percentiles used when plotting the sde distribution
-# alpha_percentiles: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55]
-# percentiles_array: [0.999, 0.99, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
+# The percentiles used when plotting the sde distribution
+alpha_percentiles: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55]
+percentiles_array: [0.999, 0.99, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
 
-# init_config:
-#   - [-0.15, -0.15]
-#   - [0.05, -0.08]
-#   # - [0.1, 0.15]
-#   - [0.05, 0.07]
+init_config:
+  - [-0.15, -0.15]
+  - [0.05, -0.08]
+  # - [0.1, 0.15]
+  - [0.05, 0.07]
 
-# # Format for learned models to plot XX__MSD_XX_XX_XX
-# # For example nestde__MSD_MeasLow_TopRight_5 according to the name of the learned models
-# files2plot: 'XX__MSD_MeasLow_TopRight_5'
+# Format for learned models to plot XX__MSD_XX_XX_XX
+# For example nestde__MSD_MeasLow_TopRight_5 according to the name of the learned models
+files2plot: 'XX__MSD_MeasLow_TopRight_5'
 
-# # The list of models to plot in the configuration (usually a grid) they need to be plotted
-# fig_args:
-#   figsize: [14, 10]
-#   nrows: 1
-#   ncols: 3
-#   # sharex: True
-#   # sharey: True
-#   constrained_layout: True
+# The list of models to plot in the configuration (usually a grid) they need to be plotted
+fig_args:
+  figsize: [14, 10]
+  nrows: 1
+  ncols: 3
+  # sharex: True
+  # sharey: True
+  constrained_layout: True
 
 
-# plot_configs:
-#   - value:
-#       - ['gaussian_mlp_ensemble']
-#       - ['node']
-#       - ['nesde']
-#     style: ['gaussian','node', 'nesde']
-#     type: "t2q" # q2qdot, 
-#     init: 1
-#     # show_xlabel: False
+plot_configs:
+  - value:
+      - ['gaussian_mlp_ensemble']
+      - ['node']
+      - ['nesde']
+    style: ['gaussian','node', 'nesde']
+    type: "t2q" # q2qdot, 
+    init: 0
+    # show_xlabel: False
   
-#   - value:
-#       - ['gaussian_mlp_ensemble']      
-#       - ['node']
-#       - ['nesde']
-#     style: ['gaussian','node', 'nesde']
-#     type: "t2qdot" # q2qdot, 
-#     init: 1
+  - value:
+      - ['gaussian_mlp_ensemble']      
+      - ['node']
+      - ['nesde']
+    style: ['gaussian','node', 'nesde']
+    type: "t2qdot" # q2qdot, 
+    init: 0
   
-#   - value:
-#       - ['gaussian_mlp_ensemble']
-#       - ['node']
-#       - ['nesde']
-#     style: ['gaussian','node', 'nesde']
-#     type: "q2qdot" # q2qdot, 
-#     init: 1
+  - value:
+      - ['gaussian_mlp_ensemble']
+      - ['node']
+      - ['nesde']
+    style: ['gaussian','node', 'nesde']
+    type: "q2qdot" # q2qdot, 
+    init: 0
 
 # plot_configs:
 #   - value:
