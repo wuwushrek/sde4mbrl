@@ -12,6 +12,8 @@ from mbrl.util.replay_buffer import TransitionIterator
 
 from mbrl.models import Model, ModelTrainer
 
+import pickle, os
+
 from tqdm import tqdm
 
 # MODEL_LOG_FORMAT = [
@@ -24,18 +26,57 @@ from tqdm import tqdm
 #     ("model_best_val_score", "MBVSCORE", "float"),
 # ]
 
-class ProgressBarCallback(tqdm):
-    
-    def __init__(self, num_training_epochs) -> None:
+class TrainCallback(tqdm):
+
+    def __init__(self, num_training_epochs : int, model_checkpoint_frequency : int = None) -> None:
         super().__init__()
         self.total = num_training_epochs
-    
-    def progress_bar_callback(self, model, tota_calls_train, epoch, train_loss, val_score, best_val_score):
+        self.model_checkpoint_frequency = model_checkpoint_frequency
+        self.training_results = {
+            "train_iteration" : [],
+            "epoch" : [],
+            "training_loss" : [],
+            "validation_score" : [],
+            "best_validation_score" : [],
+        }
+        self.model_checkpoints = {
+            "train_iteration" : [],
+            "model_state_dict" : [],
+        }
+
+    def update_progress_bar(self, epoch):
         if epoch >= self.total:
             self.close()
             return
         else:
             self.update()
+
+    def train_callback(self, model, total_calls_train, epoch, train_loss, val_score, best_val_score, total_training_iterations):
+
+        # Save the training results
+        self.training_results['train_iteration'].append(total_training_iterations)
+        self.training_results['epoch'].append(epoch)
+        self.training_results['training_loss'].append(train_loss)
+        self.training_results['validation_score'].append(val_score)
+        self.training_results['best_validation_score'].append(best_val_score)
+
+        # Save the model checkpoint
+        if (self.model_checkpoint_frequency is not None) and (total_training_iterations % self.model_checkpoint_frequency == 0):
+            self.model_checkpoints["train_iteration"].append(total_training_iterations)
+            self.model_checkpoints["model_state_dict"].append(copy.deepcopy(model.state_dict()))
+
+        # Update the tqdm progress bar
+        self.update_progress_bar(epoch)
+
+    def save_training_results(self, filepath : str):
+        file_name = 'training_results.pkl'
+        with open(os.path.join(filepath, file_name), 'wb') as f:
+            pickle.dump(self.training_results, f)
+
+    def save_model_checkpoints(self, filepath : str):
+        file_name = 'model_checkpoints.pkl'
+        with open(os.path.join(filepath, file_name), 'wb') as f:
+            pickle.dump(self.model_checkpoints, f)
 
 class SGDModelTrainer(ModelTrainer):
     """Trainer for dynamics models.
@@ -107,6 +148,7 @@ class SGDModelTrainer(ModelTrainer):
                     - training loss
                     - validation score (for ensembles, factored per member)
                     - best validation score so far
+                    - total training iterations
 
             batch_callback (callable, optional): if provided, this function will be called
                 for every batch with the output of ``model.update()`` (during training),
@@ -125,6 +167,8 @@ class SGDModelTrainer(ModelTrainer):
 
         """
         eval_dataset = dataset_train if dataset_val is None else dataset_val
+
+        elapsed_train_steps = 0
 
         assert dataset_train._shuffle_each_epoch, "Training dataset must be shuffled each epoch for SGD trainer."
 
@@ -149,6 +193,7 @@ class SGDModelTrainer(ModelTrainer):
             for batch_ind in range(num_steps_per_epoch):
                 next_batch = next(iterator)
                 loss_and_maybe_meta = self.model.update(next_batch, self.optimizer)
+                elapsed_train_steps += 1
                 if isinstance(loss_and_maybe_meta, tuple):
                     loss = cast(float, loss_and_maybe_meta[0])
                     meta = cast(Dict, loss_and_maybe_meta[1])
@@ -206,6 +251,7 @@ class SGDModelTrainer(ModelTrainer):
                     total_avg_loss,
                     eval_score,
                     best_val_score,
+                    elapsed_train_steps,
                 )
 
             if patience and epochs_since_update >= patience:

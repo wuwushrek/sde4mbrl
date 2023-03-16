@@ -14,6 +14,7 @@ ensemble_cfg = omegaconf.OmegaConf.create({
         "num_steps_per_epoch" : 10,
         "patience" : 200,
         "batch_size" : 32,
+        "model_checkpoint_frequency" : 1e3,
     },
     "dynamics_model": {
         "model" : {

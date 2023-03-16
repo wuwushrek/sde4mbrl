@@ -18,7 +18,7 @@ sys.path.append('../../')
 from mbrlLibUtils.save_and_load_models import save_model_and_config, \
     load_model_and_config
 from mbrlLibUtils.replay_buffer_utils import populate_replay_buffers, generate_sample_trajectories
-from mbrlLibUtils.sgd_model_trainer import SGDModelTrainer, ProgressBarCallback
+from mbrlLibUtils.sgd_model_trainer import SGDModelTrainer, TrainCallback
 
 device_str = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
@@ -31,6 +31,7 @@ generator.manual_seed(seed)
 
 # Construct and populate the replay buffers
 data_config_file_name = 'MSD_MeasLow_Full_700_config.yaml'
+test_data_config_file_name = 'MSD_TestData_config.yaml'
 
 data_path = os.path.abspath(os.path.join(os.path.curdir, 'my_data'))
 with open(os.path.abspath(os.path.join(data_path, data_config_file_name))) as f:
@@ -38,16 +39,21 @@ with open(os.path.abspath(os.path.join(data_path, data_config_file_name))) as f:
 with open(data_config['outfile'], 'rb') as f:
     data = pickle.load(f)
 
-train_test_split = 0.8
+with open(os.path.abspath(os.path.join(data_path, test_data_config_file_name))) as f:
+    test_data_config = yaml.safe_load(f)
+with open(test_data_config['outfile'], 'rb') as f:
+    test_data = pickle.load(f)
 
-train_trajectories = data[:int(len(data) * train_test_split)]
-test_trajectories = data[int(len(data) * train_test_split):]
+# train_test_split = 0.8
 
-num_train_datapoints = len(train_trajectories) * data_config['horizon']
-num_test_datatpoints = len(test_trajectories) * data_config['horizon']
+# train_trajectories = data[:int(len(data) * train_test_split)]
+# test_trajectories = data[int(len(data) * train_test_split):]
 
-train_buffer = populate_replay_buffers(train_trajectories, num_train_datapoints)
-test_buffer = populate_replay_buffers(test_trajectories, num_test_datatpoints)
+num_train_datapoints = len(data) * data_config['horizon']
+num_test_datatpoints = len(test_data) * test_data_config['horizon']
+
+train_buffer = populate_replay_buffers(data, num_train_datapoints)
+test_buffer = populate_replay_buffers(test_data, num_test_datatpoints)
 
 train_obs = train_buffer.obs[:train_buffer.num_stored]
 test_obs = test_buffer.obs[:test_buffer.num_stored]
@@ -72,20 +78,24 @@ train_dataset, _ = common_utils.get_basic_buffer_iterators(
 val_dataset, _ = common_utils.get_basic_buffer_iterators(
     test_buffer, cfg['trainer_setup']['batch_size'], 0, ensemble_size=1)
 
-pbar = ProgressBarCallback(cfg['trainer_setup']['num_epochs'])
-
 trainer = SGDModelTrainer(
                 dynamics_model,
                 optim_lr=cfg['trainer_setup']['optim_lr'],
                 weight_decay=cfg['trainer_setup']['weight_decay']
             )
 
+train_callback = TrainCallback(
+    num_training_epochs=cfg['trainer_setup']['num_epochs'],
+    model_checkpoint_frequency=cfg['trainer_setup']['model_checkpoint_frequency'],
+)
+
 train_losses, val_losses = trainer.train(
                                 train_dataset, 
                                 val_dataset, 
                                 num_epochs=cfg['trainer_setup']['num_epochs'], 
                                 patience=cfg['trainer_setup']['patience'], 
-                                callback=pbar.progress_bar_callback,
+                                # callback=pbar.progress_bar_callback,
+                                callback=train_callback.train_callback,
                                 num_steps_per_epoch=cfg['trainer_setup']['num_steps_per_epoch'],
                             )
 
@@ -93,6 +103,8 @@ train_losses, val_losses = trainer.train(
 experiment_name = 'gaussian_mlp_ensemble' + '_' +  data_config_file_name[:data_config_file_name.index('_config')]
 save_folder = os.path.abspath(os.path.join(os.path.curdir, 'my_models', experiment_name))
 save_model_and_config(dynamics_model, cfg, save_folder)
+train_callback.save_training_results(save_folder)
+train_callback.save_model_checkpoints(save_folder)
 
 # Plot the results
 fig, ax = plt.subplots(2, 1, figsize=(16, 8))
