@@ -23,7 +23,7 @@ seed_rng = jax.random.PRNGKey(seed)
 
 # Load the model
 experiment_name_100 = 'gaussian_mlp_ensemble_MSD_MeasLow_Full_100'
-experiment_name_700 = 'gaussian_mlp_ensemble_MSD_MeasLow_Full_700'
+experiment_name_700 = 'gaussian_mlp_ensemble__MSD_MeasLow_Full_700_sde'
 experiment_name_2000 = 'gaussian_mlp_ensemble_MSD_MeasLow_Full_2000'
 
 load_dir_100 = os.path.abspath(os.path.join(os.path.curdir, 'my_models', experiment_name_100))
@@ -42,7 +42,7 @@ init_state = np.array([0.1, 0.1])
 # Generate the true trajectory
 model_groundtruth_dir = "mass_spring_damper.yaml"
 # Generate a trajectory starting from xinit and length HORIZON
-groundtruth_sampler, _ = load_data_generator(model_groundtruth_dir, noise_info={}, horizon=time_horizon, ufun=None)
+groundtruth_sampler, _, _ = load_data_generator(model_groundtruth_dir, noise_info={}, horizon=time_horizon, ufun=None)
 gtruth_data, _ = groundtruth_sampler(init_state, seed_rng) # Second output is the control input
 gtruth_data = np.array(gtruth_data)[:-1, :]
 

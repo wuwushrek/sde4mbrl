@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 
 from mass_spring_model import load_data_generator, load_learned_model, load_learned_diffusion, _load_pkl
 from sde4mbrl.utils import load_yaml
+from mbrlLibUtils.save_and_load_models import load_learned_ensemble_model
 
 from tqdm.auto import tqdm
 
@@ -62,7 +63,7 @@ def create_density_mesh_plots(cfg_path, learned_dir, data_dir):
     rng_key = jax.random.PRNGKey(density_cfg['seed'])
 
     # Extract all files in the directory containing DensityExp in learned_dir and edning with _sde.pkl
-    files = [f for f in os.listdir(learned_dir) if '__MSD_' in f and f.endswith('_sde.pkl')]
+    files = [f for f in os.listdir(learned_dir) if '__MSD_' in f and '_sde' in f]
 
     # Extract files2plot which provide a template in form of XX__MSD_XX_XX_XX
     files2plot = density_cfg['files2plot']
@@ -209,7 +210,8 @@ def create_uncertainty_plots(cfg_path, learned_dir, data_dir, gt_dir):
     rng_key = jax.random.PRNGKey(density_cfg['seed'])
 
     # Extract all files in the directory containing DensityExp in learned_dir and edning with _sde.pkl
-    files = [f for f in os.listdir(learned_dir) if '__MSD_' in f and f.endswith('_sde.pkl')]
+    files = [f for f in os.listdir(learned_dir) if '__MSD_' in f and '_sde' in f]
+    print(files)
 
     # Extract files2plot which provide a template in form of XX__MSD_XX_XX_XX
     files2plot = density_cfg['files2plot']
@@ -255,7 +257,10 @@ def create_uncertainty_plots(cfg_path, learned_dir, data_dir, gt_dir):
         assert len(fname) == 1, "The number of files corresponding to the file name in files2plot_full is not 1"
         model_name = fname[0]
         # Extract the data name and model name
-        _train_data_name = model_name.split("__")[-1].split("_sde.pkl")[0]
+        if 'gaussian_mlp_ensemble' in model_name:
+            _train_data_name = model_name.split("__")[1].split("_sde")[0]
+        else:
+            _train_data_name = model_name.split("__")[-1].split("_sde.pkl")[0]
         # Load the training dataset
         train_data = _load_pkl(data_dir + _train_data_name + ".pkl")
         # Create the samples from training dataset
@@ -263,11 +268,16 @@ def create_uncertainty_plots(cfg_path, learned_dir, data_dir, gt_dir):
         train_data = np.array([ xev for (xev, _) in train_data])
         _sampling_datas.append(train_data)
 
-        # Now let's create a model to compute prediction error and std on the meshgrid
-        # TODO: Make sure load learn model works for probabilistic models too
-        _mesh_learned_model, _ = load_learned_model(learned_dir+model_name, horizon=horizon_pred_accuracy, 
-                                                    num_samples=num_particles if 'node' not in model_name else 1, 
-                                                    ufun=None, prior_dist=pconf.get('prior_dist', False))
+        if 'gaussian_mlp_ensemble' in model_name:
+            _mesh_learned_model, _ = load_learned_ensemble_model(learned_dir+model_name, horizon=horizon_pred_accuracy, 
+                                                        num_samples=num_particles if 'node' not in model_name else 1, 
+                                                        ufun=None)
+        else:
+            # Now let's create a model to compute prediction error and std on the meshgrid
+            # TODO: Make sure load learn model works for probabilistic models too
+            _mesh_learned_model, _ = load_learned_model(learned_dir+model_name, horizon=horizon_pred_accuracy, 
+                                                        num_samples=num_particles if 'node' not in model_name else 1, 
+                                                        ufun=None, prior_dist=pconf.get('prior_dist', False))
 
         for _i in tqdm(range(len(qgrid))):
             for _j in range(len(qdotgrid)):
@@ -291,6 +301,7 @@ def create_uncertainty_plots(cfg_path, learned_dir, data_dir, gt_dir):
     
     # Let's compute the maximum error
     _max_error = np.max(_mesh_error_evol)
+    # _max_error = 0.2
         
     # Now, let's plot the results
     # Loop over the files
@@ -376,13 +387,13 @@ def create_state_prediction(cfg_path, learned_dir, data_dir, gt_dir):
 
     # Load the ground truth model
     _gtsampler, _, gt_time_evol = load_data_generator(gt_dir, noise_info={}, horizon=horizon_accuracy, ufun=None)
-    gt_time_evol = np.array(gt_time_evol)
+    _my_time = np.array(gt_time_evol)
     
     # Create a random PRNG key
     rng_key = jax.random.PRNGKey(density_cfg['seed'])
 
     # Extract all files in the directory containing DensityExp in learned_dir and edning with _sde.pkl
-    files = [f for f in os.listdir(learned_dir) if '__MSD_' in f and f.endswith('_sde.pkl')]
+    files = [f for f in os.listdir(learned_dir) if '__MSD_' in f and '_sde' in f]
 
     # Extract files2plot which provide a template in form of XX__MSD_XX_XX_XX
     files2plot = density_cfg['files2plot']
@@ -440,7 +451,10 @@ def create_state_prediction(cfg_path, learned_dir, data_dir, gt_dir):
         first_iter = True
         for model_name, _style in zip(row_models, pconf['style']):
             # Extract the data name and model name
-            _train_data_name = model_name.split("__")[-1].split("_sde.pkl")[0]
+            if 'gaussian_mlp_ensemble' in model_name:
+                _train_data_name = model_name.split("__")[1].split("_sde")[0]
+            else:
+                _train_data_name = model_name.split("__")[-1].split("_sde.pkl")[0]
             # Load the training dataset
             train_data = _load_pkl(data_dir + _train_data_name + ".pkl")
             # Create the samples from training dataset
@@ -448,8 +462,15 @@ def create_state_prediction(cfg_path, learned_dir, data_dir, gt_dir):
             train_data = np.array([ xev for (xev, _) in train_data])
             # Now let's create a model to compute prediction error and std on the meshgrid
             # TODO: Make sure load learn model works for probabilistic models too
-            _mesh_learned_model, _my_time = load_learned_model(learned_dir+model_name, horizon=horizon_accuracy, num_samples=num_particles, ufun=None)
-            _my_time = np.array(_my_time)
+            # _mesh_learned_model, _my_time = load_learned_model(learned_dir+model_name, horizon=horizon_accuracy, num_samples=num_particles, ufun=None)
+            if 'gaussian_mlp_ensemble' in model_name:
+                _mesh_learned_model, _ = load_learned_ensemble_model(learned_dir+model_name, horizon=horizon_accuracy, num_samples=num_particles, ufun=None)
+            else:
+                # Now let's create a model to compute prediction error and std on the meshgrid
+                # TODO: Make sure load learn model works for probabilistic models too
+                _mesh_learned_model, _ = load_learned_model(learned_dir+model_name, horizon=horizon_accuracy, num_samples=num_particles, ufun=None)
+
+            # _my_time = np.array(_my_time)
             # Extract the initial state for integration
             xinit = np.array(init_config[pconf['init']])
             # Compute the groundtruth

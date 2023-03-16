@@ -12,7 +12,7 @@ ensemble_cfg = omegaconf.OmegaConf.create({
         "weight_decay" : 5e-5,
         "num_epochs" : 5000,
         "num_steps_per_epoch" : 10,
-        "patience" : 200,
+        "patience" : 2000,
         "batch_size" : 32,
         "model_checkpoint_frequency" : 1e3,
     },

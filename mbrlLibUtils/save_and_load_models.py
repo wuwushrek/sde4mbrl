@@ -3,6 +3,8 @@ import pickle, os
 import mbrl.models as models
 import mbrl.util.common as common_utils
 
+from mbrlLibUtils.replay_buffer_utils import generate_sample_trajectories
+
 import torch
 import numpy as np
 from tqdm import tqdm
@@ -69,5 +71,38 @@ def load_model_and_config(save_dir, propagation_method=None):
 
     return model, config
 
+def load_learned_ensemble_model(model_path, horizon=1, num_samples=1, ufun=None, rseed=1000, prior_dist=False):
+    """ Load the learned model from the path
 
+        Args:
+            model_path (str): The path to the learned model
+            horizon (int, optional): The horizon of the model
+            num_samples (int, optional): The number of samples to generate
+            ufun (function, optional): The control function
+            rseed (int, optional): The random seed for the sampling (default: 1000)
+            prior_dist (bool, optional): If True, the function will sample from the prior knowledge of the system + prior diffusion
 
+        Returns:
+            sampling (function): A function to sample from the learned model
+                sampling(y, rng) -> yevol
+            
+            _time_evol (np.array): The time evolution of the model
+        
+    """
+    # Load the model
+    model, _ = load_model_and_config(model_path, propagation_method="expectation")
+
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+    else:
+        device = torch.device('cpu')
+
+    generator = torch.Generator(device=device)
+    generator.manual_seed(rseed)
+
+    def sampling(y, rng):
+        return generate_sample_trajectories(y, num_samples, model, generator, time_horizon=horizon + 1, ufun=ufun, device=device).cpu().numpy()
+
+    _time_evol = np.arange(0, horizon + 1, 0.01)
+
+    return sampling, _time_evol

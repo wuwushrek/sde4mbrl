@@ -39,7 +39,7 @@ def populate_replay_buffers(dataset : tuple, buffer_size : int, save_actions : b
 
     return replay_buffer
 
-def generate_sample_trajectories(init_state, num_particles, dynamics_model, generator, time_horizon, device=None):
+def generate_sample_trajectories(init_state, num_particles, dynamics_model, generator, time_horizon, ufun=None, device=None):
     """
     Generate sample trajectories from the dynamics model
     
@@ -56,6 +56,10 @@ def generate_sample_trajectories(init_state, num_particles, dynamics_model, gene
         Random number generator
     time_horizon : int
         Time horizon for the sample trajectories
+    ufun : function
+        Control function.
+    device : torch.device
+        Device to use for the computations.
         
     Returns
     -------
@@ -73,11 +77,15 @@ def generate_sample_trajectories(init_state, num_particles, dynamics_model, gene
         initial_obs_batch.astype(np.float32), rng=generator
     )
 
-    act = torch.zeros((num_particles,0), device=device)
+    act_zero = torch.zeros((num_particles,0), device=device)
+    if ufun is None:
+        ufun = lambda state : act_zero
+
+    # act = torch.zeros((num_particles,0), device=device)
 
     for t in range(time_horizon):
         with torch.no_grad():
-            next_obs, _, _, model_state = dynamics_model.sample(act, model_state, rng=generator)
+            next_obs, _, _, model_state = dynamics_model.sample(ufun(model_state), model_state, rng=generator)
         if t == 0:
             sample_trajectories = next_obs.reshape(num_particles, 1, -1)
         else:
