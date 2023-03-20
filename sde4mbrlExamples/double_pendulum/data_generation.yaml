@@ -1,25 +1,21 @@
+# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python double_pendulum_model.py --fun gen_traj --data_gen_cfg data_generation.yaml
+
 seed_trans: 10
 
 # Horizon when generating the data
 # Thus, the total number of data is num_sample * (horizon + 1)
-horizon: 1000 # 8s of trajectories
+horizon: 1500 # 8s of trajectories
 
 # The possible noise setting configuration
 noise_settings:
   MeasLow: 
     # pnoise: [0.001, 0.001] # Process noise
-    mnoise: [0.0001, 0.0001, 0.001, 0.001] # Measurement noise
-  # MeasMedium: 
-  #   # pnoise: [0.001, 0.001] # Process noise
-  #   mnoise: [0.0001, 0.0001, 0.003, 0.003] # Measurement noise
-  MeasHigh: 
-    # pnoise: [0.001, 0.001] # Process noise
-    mnoise: [0.0005, 0.0005, 0.005, 0.005] # Measurement noise
+    mnoise: [0.001, 0.001, 0.01, 0.01] # Measurement noise
 
 sampling_domain_settings:
     TopLeft: 
-      lb: [-0.1, -0.1, -0.01, -0.01]
-      ub: [0.0, 0.0, 0.01, 0.01]
+      lb: [0, 0, -0.2, -0.2]
+      ub: [0.1, 0.1, 0.2, 0.2]
     # Full:
     #   lb: [-0.5, -0.5, -0.3, -0.3]
     #   ub: [0.5, 0.5, 0.3, 0.3]
@@ -29,13 +25,13 @@ regenerate: True
 
 # List of number of sample for data generation
 # Dataset are going to be generate for all the sampling and noise settings above
-num_samples: [2, 10, 30]
+num_samples: [1, 3, 8, 15]
 
 test_data:
-  horizon: 5000
-  num_samples: 10
-  mnoise: [0.0001, 0.0001, 0.001, 0.001]
+  # horizon: 5000
+  num_samples: 2
+  mnoise: [0.001, 0.001, 0.01, 0.01]
   pnoise: null
-  domain_lb: [-0.1, -0.1, -0.01, -0.01]
-  domain_ub: [0.1, 0.1, 0.01, 0.01]
+  domain_lb: [-0.1, -0.1, -0.02, -0.02]
+  domain_ub: [0.1, 0.1, 0.02, 0.02]
   test_seed: 20

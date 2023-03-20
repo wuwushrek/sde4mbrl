@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 import numpy as np
 
-from sde4mbrl.nsde import ControlledSDE, create_sampling_fn
+from sde4mbrl.nsde import ControlledSDE, create_sampling_fn, compute_timesteps, create_diffusion_fn
 from sde4mbrl.utils import load_yaml, apply_fn_to_allleaf, update_params
 from sde4mbrl.train_sde import train_model
 
@@ -32,6 +32,11 @@ class DoublePendulum(ControlledSDE):
         # Initialization of the residual networks
         # This function setup the parameters of the unknown neural networks and the residual network
         self.init_residual_networks()
+
+        # Set the reduced_state function if side information is given
+        if self.params.get('include_side_info', False):
+            self.reduced_state = lambda x: jnp.array([x[0], x[1], x[2]**2, x[3]**2])
+
     
     def vector_field(self, x, u, f1=0.0, f2=0.0):
         """Compute the dynamics of the double pendulum
@@ -49,7 +54,7 @@ class DoublePendulum(ControlledSDE):
         # Extract the state
         t1, t2, w1, w2 = x
         # Check if groundtruth
-        if self.params['ground_truth']:
+        if self.params.get('ground_truth', False):
             # Compute f1 and f2 from the groundtruth
             f1 = -(l2 / l1) * (m2 / (m1 + m2)) * (w2**2) * jnp.sin(t1 - t2) - (gravity / l1) * jnp.sin(t1)
             f2 = (l1 / l2) * (w1**2) * jnp.sin(t1 - t2) - (gravity / l2) * jnp.sin(t2)
@@ -62,7 +67,40 @@ class DoublePendulum(ControlledSDE):
 
         return jnp.array([w1, w2, g1, g2])
 
+    def prior_diffusion(self, x, u, extra_args=None):
+        # Set the prior to a constant noise as defined in the yaml file
+        return jnp.array(self.params['noise_prior_params'])
+
+
+    def compositional_drift(self, x, u, extra_args=None):
+        # In the ground truth case, we do not need to compute the residual
+        if self.params.get('ground_truth',False):
+            return self.vector_field(x, u)
+        
+        # Check if there is side information about the evolution
+        if not (self.params.get('include_side_info', False) or self.params.get('include_side_info_v2', False)):
+            # Compute the residual
+            Fres = self.residual(x, u)
+            return jnp.array([x[2], x[3], Fres[0], Fres[1]])
+        
+        # Compute the residual
+        if self.params.get('include_side_info_v2', False):
+            xnew = jnp.array([x[0], x[1], x[2], x[3]])
+        else:
+            xnew = jnp.array([x[0], x[1], x[2]**2, x[3]**2])
+        Fres = self.residual(xnew, u)
+
+        return self.vector_field(x, u, f1=Fres[0], f2=Fres[1])
+
+    def init_encoder(self):
+        _encoder_type = self.params.get('encoder_type', 'identity')
+        if _encoder_type == 'ground_truth' or _encoder_type == 'identity':
+            self.obs2state = self.identity_obs2state
+            self.state2obs = self.identity_state2obs
+        else:
+            raise ValueError('Unknown encoder type')
     
+
     def init_residual_networks(self):
         """Initialize the residual networks.
         """
@@ -71,89 +109,34 @@ class DoublePendulum(ControlledSDE):
             pass
 
         residual_type = self.params['residual_forces']['type']
+        init_value = self.params['residual_forces'].get('init_value', 0.001)
         if residual_type == 'dnn':
             # Get the residual network parameters
             _act_fn = self.params['residual_forces']['activation_fn']
             self.residual_forces = hk.nets.MLP([*self.params['residual_forces']['hidden_layers'], 2],
                                                 activation = getattr(jnp, _act_fn) if hasattr(jnp, _act_fn) else getattr(jax.nn, _act_fn),
-                                                w_init=hk.initializers.RandomUniform(-1e-3, 1e-3),
+                                                w_init=hk.initializers.RandomUniform(-init_value, init_value),
                                                 name = 'Fres')
-            self.residual = lambda x, u: self.residual_forces(x)
+            self.prior_unknown = lambda x, u : jnp.zeros((2,))
+            self.residual = lambda x, u: self.residual_forces(x) if not self.params.get('prior', False) else self.prior_unknown(x, u)
             return
-        # elif residual_type == 'dnn_sym':
 
-        #     # [TODO] This might not converge so to check
-        #     # Create the side information with symmetry information
-        #     _act_fn = self.params['residual_forces']['activation_fn']
-        #     self.residual_forces = hk.nets.MLP([*self.params['residual_forces']['hidden_layers'], 2],
-        #                                         activation = getattr(jnp, _act_fn) if hasattr(jnp, _act_fn) else getattr(jax.nn, _act_fn),
-        #                                         w_init=hk.initializers.RandomUniform(-1e-3, 1e-3),
-        #                                         name = 'Fres')
-        #     def residual(x, _u):
-        #         # Absoulte value of the state
-        #         xabs = jnp.abs(x)
-        #         res_val = self.residual_forces(xabs)
-        #         # We need to add the sign of the first two states
-        #         return 
-
-    def prior_drift(self, x, u, extra_args=None):
-        """Drift of the prior dynamics
-            This is the approximate and undamped dynamics of the system
-        """
-
-        if self.params['ground_truth']:
-            return self.vector_field(x, u)
-
-        # If there is no side information about the evolution, the prior is set to OU process
-        if not self.params['include_side_info']:
-            return jnp.array([x[2], x[3], -x[2], -x[3]]) # OU process for the second order derivative
-
-        # We set the residual to zero by default
-        return self.vector_field(x, u, f1=x[1]-x[0], f2=x[0]-x[1])
-    
-    def posterior_drift(self, x, u, extra_args=None):
-        """Drift of the posterior dynamics
-        """
-        if self.params['ground_truth']:
-            return self.vector_field(x, u)
-
-        # Check if there is side information about the evolution
-        if not self.params['include_side_info']:
-            # Compute the residual
-            Fres = self.residual(x, u)
-            return jnp.array([x[2], x[3], Fres[0], Fres[1]])
-        
-        # Compute the residual
-        xnew = jnp.array([x[0], x[1], jnp.abs(x[2]), jnp.abs(x[3])])
-        Fres = self.residual(xnew, u)
-
-        return self.vector_field(x, u, f1=Fres[0], f2=Fres[1])
-    
-    def prior_diffusion(self, x, extra_args=None):
-        """Diffusion term of the prior dynamics
-        """
-        # We set the diffusion to zero, diagonal matrix by default
-        zero_diffusion = jnp.zeros((self.params['n_x'],))
-
-        if self.params['diffusion_type'] == 'zero' or self.params['diffusion_type'] == 'nonoise':
-            return zero_diffusion
-        
-        if self.params['diffusion_type'] == 'constant':
-            amp_noise = self.params['amp_noise'] if self.params['include_side_info'] else self.params['nosi_amp_noise']
-            return jnp.array(amp_noise)
-
-        raise ValueError('Unknown diffusion type')
+        else:
+            raise ValueError('Unknown residual type')
 
 
 def load_predictor_function(learned_params_dir, prior_dist=False, modified_params ={}):
-    """ Create a function to sample from the prior distribution or
-        to sample from the posterior distribution
+    """ Create a function to sample the learned SDE distribution
         
         Args:
             learned_params_dir (str): The path to the learned parameters or to the nominal yaml model file
-            prior_dist (bool, optional): If True, the function will sample from the prior distribution
-            nonoise (bool, optional): If True, the function will sample from the prior distribution without noise
+            prior_dist (bool, optional): If True, the function will sample from the prior knowledge of the system + prior diffusion
             modified_params (dict, optional): A dictionary of parameters to modify the default parameters
+        
+        Returns:
+            function: A jitted function to sample from the learned SDE distribution
+            time_evol: The array of time points at which the SDE is sampled
+
     """
     # Expand user name
     learned_params_dir = os.path.expanduser(learned_params_dir)
@@ -162,6 +145,7 @@ def load_predictor_function(learned_params_dir, prior_dist=False, modified_param
     if learned_params_dir.endswith('.yaml'): # yaml file are usually used for the nominal parameters
         _model_params = load_yaml(learned_params_dir)['model']
         _sde_learned = {}
+
     elif learned_params_dir.endswith('.pkl'):
         # Load the pickle file
         with open(learned_params_dir, 'rb') as f:
@@ -175,33 +159,88 @@ def load_predictor_function(learned_params_dir, prior_dist=False, modified_param
 
     # Update the parameters with a user-supplied dctionary of parameters
     params_model = update_params(_model_params, modified_params)
+    if prior_dist:
+        # Set the key prior to True
+        params_model['prior'] = True
+        # Remove the density NN parameters so that the noise is given by the prior diffusion only
+        params_model.pop('diffusion_density_nn', None)
+
 
     # Create the model
-    _, m_sampling = create_sampling_fn(params_model, sde_constr=DoublePendulum, prior_sampling=prior_dist)
+    _prior_params, m_sampling = create_sampling_fn(params_model, sde_constr=DoublePendulum)
 
-    print(params_model)
+    # Compute the timestep of the model the extract the time evolution starting t0 = 0
+    time_steps = compute_timesteps(params_model)
+    time_evol = np.array([0] + jnp.cumsum(time_steps).tolist())
 
-    return lambda *x : m_sampling(_sde_learned, *x)
+
+    # Do not use the sde_learned params when sampling from the prior distribution
+    _sde_learned = _prior_params if prior_dist else _sde_learned
+
+    # Print the model parameters
+    print('Model config parameters:\n', params_model)
+    print('\nLearned model parameters:\n', _sde_learned)
+
+    return lambda *x : m_sampling(_sde_learned, *x), time_evol
 
 def load_learned_model(model_path, horizon=1, num_samples=1, ufun=None, prior_dist=False):
     """ Load the learned model from the path
+
         Args:
             model_path (str): The path to the learned model
+            horizon (int, optional): The horizon of the model
+            num_samples (int, optional): The number of samples to generate
+            ufun (function, optional): The control function
+            prior_dist (bool, optional): If True, the function will sample from the prior knowledge of the system + prior diffusion
+
+        Returns:
+            sampling_jit (function): A cpu jitted function to sample from the learned model
+                sampling_jit(y, rng) -> yevol
+            
+            _time_evol (np.array): The time evolution of the model
+        
     """
     modified_params = {'horizon': horizon, 'num_particles': num_samples}
     # Load the model
-    pred_fn = load_predictor_function(model_path, modified_params=modified_params, prior_dist=prior_dist)
+    pred_fn, _time_evol = load_predictor_function(model_path, modified_params=modified_params, prior_dist=prior_dist)
 
     # Define the control function
     if ufun is None:
-        ufun = lambda *x : jnp.array([0.0])
+        ufun = lambda *x : 0.0
     
     @partial(jax.jit, backend='cpu')
-    def sampling_jit(x, rng):
-        xevol, _ = pred_fn(x, ufun, rng)
-        return xevol
+    def sampling_jit(y, rng):
+        _, yevol, _ = pred_fn(y, ufun, rng)
+        return yevol
 
-    return sampling_jit
+    return sampling_jit, _time_evol
+
+def load_learned_diffusion(model_path, num_samples=1):
+    """ Load the learned diffusion from the path
+        Args:
+            model_path (str): The path to the learned model
+            num_samples (int, optional): The number of samples to generate
+    """
+    learned_params_dir = os.path.expanduser(model_path)
+    # Load the pickle file
+    with open(learned_params_dir, 'rb') as f:
+        learned_params = pickle.load(f)
+    # vehicle parameters
+    _model_params = learned_params['nominal']
+    # SDE learned parameters -> All information are saved using numpy array to facilicate portability
+    # of jax accross different devices
+    # These parameters are the optimal learned parameters of the SDE
+    _sde_learned = apply_fn_to_allleaf(jnp.array, np.ndarray, learned_params['sde'])
+    # Create the function to compute the diffusion
+    _, m_diff_fn = create_diffusion_fn(_model_params, sde_constr=DoublePendulum)
+
+    @partial(jax.jit, static_argnums=(2,))
+    def diffusion_fn(y, rng, net=False):
+        m_rng = jax.random.split(rng, num_samples)
+        # We use zero control input
+        return jax.vmap(m_diff_fn, in_axes=(None, None, None, 0, None))(_sde_learned, y, jnp.array([0.0]), m_rng, net)
+    
+    return diffusion_fn
 
 def load_data_generator(model_dir, noise_info={}, horizon=1, ufun=None):
     """ Create a function to generate data from the prior distribution or
@@ -213,29 +252,35 @@ def load_data_generator(model_dir, noise_info={}, horizon=1, ufun=None):
                 A key 'process_noise' would be used to specify noise amplitude in the diffusion term, quite similar to the 'amp_noise' in the model
                 A key 'measurement_noise' would be used to specify noise term to add when data at the end of the sampling when the data is measured
             horizon (int, optional): The horizon of the data generator
+            ufun (function, optional): The control function
+        
+        Returns:
+            sampling_fn (function): A jitted function to generate trajectories given initial y0 and rng
+                sampling_fn(y0, rng) -> yevol, uevol
+            data_generator (function): A function to randomly generate data trajectories from uniformly sample initial conditions
+                data_generator(x_lb, x_ub, n_trans, seed) -> [(yevol, uevol),....]
+
     """
     # Construct the modified params dictionary
     modified_params = {}
-    modified_params['include_side_info'] = False
     modified_params['num_particles'] = 1
     modified_params['horizon'] = horizon
     modified_params['ground_truth'] = True
     modified_params['control'] = False if ufun is None else True
-    modified_params['diffusion_type'] = 'zero' if 'process_noise' not in noise_info else 'constant'
-    modified_params['nosi_amp_noise'] = noise_info['process_noise'] if 'process_noise' in noise_info else [0.0, 0.0, 0.0, 0.0]
+    modified_params['noise_prior_params'] = [0.0, 0.0, 0.0, 0.0] if 'process_noise' not in noise_info else noise_info['process_noise']
+    
+    # Create the model
+    sampling_fn, _time_evol = load_predictor_function(model_dir, prior_dist=True, modified_params=modified_params)
+    # Jit the sampling function on the CPU -> We only extract the first sample
 
     # Define the control function
     if ufun is None:
         ufun = lambda *x : jnp.array([0.0])
-    
-    # Create the model
-    sampling_fn = load_predictor_function(model_dir, prior_dist=False, modified_params=modified_params)
-    # Jit the sampling function on the CPU -> We only extract the first sample
 
     @partial(jax.jit, backend='cpu')
-    def sampling_fn_jit(x, rng):
-        xevol, uevol = sampling_fn(x, ufun, rng)
-        return xevol[0], uevol[0] # We only extract the first sample
+    def sampling_fn_jit(y, rng):
+        _, yevol, uevol = sampling_fn(y, ufun, rng)
+        return yevol[0], uevol[0] # We only extract the first sample
 
     def data_generator(x_lb, x_ub, n_trans, seed=0):
         """ Generate data from the ground truth model
@@ -259,41 +304,35 @@ def load_data_generator(model_dir, noise_info={}, horizon=1, ufun=None):
 
         for i in tqdm(range(n_trans)):
             # Sample the initial state with numpy
-            x0 = np.random.uniform(x_lb, x_ub)
+            y0 = np.random.uniform(x_lb, x_ub)
             # Split the key for next iteration
             key, next_key = jax.random.split(key)
             # Compute next state
-            x_evol, u_evol = sampling_fn_jit(x0, next_key)
-            x_evol = np.array(x_evol) # Take only one particle
+            y_evol, u_evol = sampling_fn_jit(y0, next_key)
+            y_evol = np.array(y_evol) # Take only one particle
             u_evol = np.array(u_evol) # Take only one particle
             # Add noise to the measurement if enabled except for the first state
             if 'measurement_noise' in noise_info:
-                x_evol += np.random.normal(size=x_evol.shape) * noise_info['measurement_noise']
-                # x_evol[1:] += np.random.normal(size=x_evol[1:].shape) * noise_info['measurement_noise']
+                y_evol += np.random.normal(size=y_evol.shape) * noise_info['measurement_noise']
             # Add the data to the list
-            data.append((x_evol, u_evol))
+            data.append((y_evol, u_evol))
         
         return data
     
-    return sampling_fn_jit, data_generator
+    return sampling_fn_jit, data_generator, _time_evol
 
-def train_sde(yaml_cfg_file, model_type, train_data, test_data, output_file=None):
+def train_sde(yaml_cfg_file, model_type, train_data, test_data, output_file=None, modified_params={}):
     """ Main function to train the SDE
 
         Args:
             yaml_cfg_file (str): The path to the yaml configuration file
-            model_type (str): The type of model to use. Choice between 'node_bboxes', 'nesde_bboxes', 'node_phys', 'nesde_phys'
+            model_type (str): The type of model to use.
             train_data (list): The list of training data
             test_data (list): The list of test data
             output_file (str, optional): The name of the output file
     """
     # Load the yaml file
     cfg_train = load_yaml(yaml_cfg_file)
-
-    # Get the horizon from the dataset transition
-    # not_one_step_split = 'nesde' in model_type
-    # not_one_step_split = True
-    # cfg_train['sde_loss']['horizon'] = train_data[0][1].shape[0] if not_one_step_split else 1
     
     # Specify the dimension of the problem
     cfg_train['model']['n_x']  = 4
@@ -301,49 +340,33 @@ def train_sde(yaml_cfg_file, model_type, train_data, test_data, output_file=None
     cfg_train['model']['n_u']  = 1
 
     # Modify the model according to the type
-    if model_type == 'node_bboxes':
-        # Black box model neural ode model
-        cfg_train['model']['diffusion_type'] = 'zero' # nonoise
-        cfg_train['model']['include_side_info'] = False
-        cfg_train['model']['ground_truth'] = False
-        cfg_train['sde_loss']['num_particles'] = 1
-    elif model_type == 'nesde_bboxes':
-        # Black box model neural ode model
-        assert cfg_train['model']['diffusion_type'] != 'zero' and cfg_train['model']['diffusion_type'] != 'nonoise', "Diffusion type cannot be zero or nonoise for SDE"
-        cfg_train['model']['include_side_info'] = False
-        cfg_train['model']['ground_truth'] = False
-    elif model_type == 'node_phys':
-        # Physical model neural ode model
-        cfg_train['model']['diffusion_type'] = 'zero'
-        cfg_train['model']['include_side_info'] = True
-        cfg_train['model']['ground_truth'] = False
-        cfg_train['sde_loss']['num_particles'] = 1
-    elif model_type == 'nesde_phys':
-        # Physical model neural ode model
-        assert cfg_train['model']['diffusion_type'] != 'zero' and cfg_train['model']['diffusion_type'] != 'nonoise', "Diffusion type cannot be zero or nonoise for SDE"
-        cfg_train['model']['include_side_info'] = True
-        cfg_train['model']['ground_truth'] = False
+    if 'node' in model_type:
+        # We are dealing with training a neural ode model -> No noise and no learning of density
+        if 'phys_v2' in model_type:
+            cfg_train['model']['include_side_info_v2'] = True
+        elif 'phys' in model_type:
+            cfg_train['model']['include_side_info'] = True
+        cfg_train['model']['noise_prior_params'] = [0.0, 0.0, 0.0, 0.0]
+        cfg_train['model'].pop('diffusion_density_nn', None) # Remove the diffusion density network
+        cfg_train['sde_loss']['num_particles'] = 1 # No need for multiple particles
+        cfg_train['sde_loss']['num_particles_test'] = 1 
+        cfg_train['sde_loss'].pop('density_loss', None) # Remove the density loss
+        cfg_train['sde_loss'].pop('num_sample2consider', None)
+    elif 'nesde' in model_type:
+        # We are dealing with training a neural sde model -> No noise and no learning of density
+        if 'phys_v2' in model_type:
+            cfg_train['model']['include_side_info_v2'] = True
+        elif 'phys' in model_type:
+            cfg_train['model']['include_side_info'] = True
     else:
         raise ValueError("Unknown model type: " + model_type)
+
+    # Add the modifed parameters
+    if len(modified_params) > 0:
+        cfg_train = update_params(cfg_train, modified_params)
         
-    # # Build the full data
-    # if not_one_step_split:
-    #     is_data_trajectory = False
-    #     full_data = { 'y' : np.array([x for x, _ in train_data]), 'u' : np.array([u for _, u in train_data])}
-    #     test_traj_data = { 'y' : np.array([x for x, _ in test_data]), 'u' : np.array([u for _, u in test_data])}
-    # else:
-    #     is_data_trajectory = True
-    #     full_data = [{ 'y' : x, 'u' : u} for x, u in train_data]
-    #     test_traj_data = [{ 'y' : x, 'u' : u} for x, u in test_data]
-    
     full_data = [{ 'y' : x, 'u' : u} for x, u in train_data]
     test_traj_data = [{ 'y' : x, 'u' : u} for x, u in test_data]
-
-    # print(full_data['y'].shape)
-    # print(full_data['u'].shape)
-
-    # Build the test data
-    # test_traj_data = { 'y' : np.array([x for x, _ in test_data]), 'u' : np.array([u for _, u in test_data])}
 
     # Create the output file
     if output_file is None:
@@ -355,22 +378,8 @@ def train_sde(yaml_cfg_file, model_type, train_data, test_data, output_file=None
     current_dir = os.path.dirname(os.path.realpath(__file__))
     output_file = current_dir + '/my_models/' + output_file
 
-    # TODO: Improve this stopping criteria
-    def _improv_cond(opt_var, test_res, train_res, itr_count):
-        """Improvement condition
-        """
-        optTotalLoss = opt_var['totalLoss']
-        train_total_loss = train_res['totalLoss'] * cfg_train['sde_training']['coeff_improv_training_data']
-        test_total_loss = test_res['totalLoss']
-        if optTotalLoss > train_total_loss + test_total_loss or itr_count <= 1:
-            test_res['totalLoss'] = train_total_loss + test_total_loss
-            return True
-        else:
-            return False
-        # return opt_var['totalLoss'] > test_res['totalLoss']
-
     # Train the model
-    train_model(cfg_train, full_data, test_traj_data, output_file, _improv_cond, DoublePendulum)
+    train_model(cfg_train, full_data, test_traj_data, output_file, DoublePendulum)
 
 
 ################# Bunch of commanda line functions to train the models and generate data #################
@@ -403,7 +412,7 @@ def gen_traj(model_dir, outfile, num_trans, domain_lb, domain_ub, pnoise, mnoise
     # Function for the control input
     uFun = None # No control input
 
-    _, trans_generator = load_data_generator(model_dir, noise_info, horizon, uFun)
+    _, trans_generator, _ = load_data_generator(model_dir, noise_info, horizon, uFun)
 
     # Generate the data
     trans_data = trans_generator(domain_lb, domain_ub, num_trans, seed_trans)
@@ -450,7 +459,7 @@ def gen_traj_yaml(model_dir, data_gen_dir):
         for knoise, _noise in noise_settings.items():
             for kdomain, _domain in domain_settings.items():
                 # Create an output file name based on the configuration
-                output_file = 'MSD_{}_{}_{}'.format(knoise, kdomain, num_sample)
+                output_file = 'DoPe_{}_{}_{}'.format(knoise, kdomain, num_sample)
                 data_gen_cfgs.append(
                     {
                         'outfile' : output_file,
@@ -475,9 +484,9 @@ def gen_traj_yaml(model_dir, data_gen_dir):
     print("Generating test data")
     _cfg_t = cfg_data_gen['test_data']
     print(_cfg_t)
-    gen_traj(model_dir, outfile='MSD_TestData', num_trans = _cfg_t['num_samples'], domain_lb = _cfg_t['domain_lb'], 
+    gen_traj(model_dir, outfile='DoPe_TestData', num_trans = _cfg_t['num_samples'], domain_lb = _cfg_t['domain_lb'], 
                 domain_ub = _cfg_t['domain_ub'], pnoise = _cfg_t['pnoise'], mnoise = _cfg_t['mnoise'], 
-                horizon = _cfg_t['horizon'], seed_trans= _cfg_t['test_seed'], regenerate=True
+                horizon = cfg_data_gen.get('horizon', 1), seed_trans= _cfg_t['test_seed'], regenerate=True
     )
 
 # Load a pkl file
@@ -485,7 +494,7 @@ def _load_pkl(filename):
     with open(filename, 'rb') as f:
         return pickle.load(f)
 
-def train_models_on_dataset(model_dir, model_type, specific_data=None):
+def train_models_on_dataset(model_dir, model_type, specific_data=None, modified_params={}):
     """ Train the given model type: It could be one of 'node_bboxes', 'nesde_bboxes', 'node_phys', 'nesde_phys'.
         The training dataset and testing dataset is extracted from my_data folder
 
@@ -534,7 +543,8 @@ def train_models_on_dataset(model_dir, model_type, specific_data=None):
         print ("Training model: {}/{}".format(_k+1, len(trainDataList)))
         print(outputNames[_k])
         print("=====================================================================")
-        train_sde(model_dir, model_type, _data, testData, outputNames[_k])
+        train_sde(model_dir, model_type, _data, testData, outputNames[_k], modified_params=modified_params)
+
 
 if __name__ == '__main__':
 
@@ -547,7 +557,7 @@ if __name__ == '__main__':
     parser.add_argument('--fun', type=str, default='gen_traj', help='The function to run')
     parser.add_argument('--model_dir', type=str, default='double_pendulum.yaml', help='The model configuration and groundtruth file')
     parser.add_argument('--data_gen_cfg', type=str, default='data_generation.yaml', help='The data generation configuration file')
-    parser.add_argument('--model_type', type=str, default='node_bboxes', help='The model train: node_bboxes, nesde_bboxes, node_phys, nesde_phys')
+    parser.add_argument('--model_type', type=str, default='nesde', help='The model train')
     parser.add_argument('--data', type=str, default='', help='Specific data file to train on')
 
     # Execute the parse_args() method

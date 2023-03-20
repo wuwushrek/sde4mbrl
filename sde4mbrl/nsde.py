@@ -219,6 +219,11 @@ class ControlledSDE(hk.Module):
             TYPE: A vector encoding the constraints
         """
         return None
+
+    def reduced_state(self, _x):
+        """ User-defined function to reduce the state / latent space for noise estimation
+        """
+        return _x
     
     def construct_diffusion_density_nn(self):
         """ Define the neural network that parametrizes the diffusion's density over the training dataset.
@@ -257,7 +262,7 @@ class ControlledSDE(hk.Module):
         self.noise_outputs = jnp.array(self.params['diffusion_density_nn'].get('indx_noise_out', jnp.arange(self.n_x)))
 
         # Define the function that concatenates the state and control input if needed for the density NN
-        self.noise_relevant_state = lambda _x : _x[self.noise_inputs] if self.noise_inputs.shape[0] < self.n_x else _x
+        self.noise_relevant_state = lambda _x : self.reduced_state(_x[self.noise_inputs]) if self.noise_inputs.shape[0] < self.n_x else self.reduced_state(_x)
         self.noise_aug_state_ctrl = lambda _x, _u : jnp.concatenate([self.noise_relevant_state(_x), _u], axis=-1) if self.params.get('control_dependent_noise', False) else self.noise_relevant_state(_x)
         self.noise_aug_output = lambda _z : jnp.ones(self.n_x).at[self.noise_outputs].set(_z) if self.noise_outputs.shape[0] < self.n_x else _z
         
