@@ -39,55 +39,53 @@ def compute_timesteps(params):
     return jnp.array([short_step_dt] * num_short_dt + [long_step_dt] * num_long_dt)
 
 
-# def initialize_problem_constraints(n_x, n_u, params_model):
-#     """Check if there are any constraints involved on the hidden states or the inputs
-#        of the sde model. The constraints are going to be enforced via nonsmooth optimization
-#        or a change of variable with smooth optimization and proximal projection
+def initialize_problem_constraints(n_x, n_u, params_model):
+    """Check if there are any constraints involved on the hidden states or the inputs
+       of the sde model. The constraints are going to be enforced via nonsmooth optimization
+       or a change of variable with smooth optimization and proximal projection
 
-#     Args:
-#         params_model (TYPE): The parameters of the model
+    Args:
+        params_model (TYPE): The parameters of the model
 
-#     Returns:
-#         TYPE: Description
-#     """
-#     # TODO: CLEAN this function and find its right place
-#     import jax.numpy as jnp
+    Returns:
+        TYPE: Description
+    """
 
-#     # n_u = params_model['n_u']
-#     # Check if some bounds on u are present
-#     has_ubound = 'input_constr' in params_model
-#     input_lb, input_ub = None, None
-#     if has_ubound:
-#         print('Found input bound constraints...\n')
-#         input_lb = [-jnp.inf for _ in range(n_u)]
-#         input_ub =[jnp.inf for _ in range(n_u)]
-#         input_dict = params_model['input_constr']
-#         assert len(input_dict['input_id']) <= n_u and \
-#                 len(input_dict['input_id']) == len(input_dict['input_bound']),\
-#                 "The number of constrained inputs identifier does not match the number of bounds"
-#         for idx, (u_lb, u_ub) in zip(input_dict['input_id'], input_dict['input_bound']):
-#             input_lb[idx], input_ub[idx] = u_lb, u_ub
-#         input_lb = jnp.array(input_lb)
-#         input_ub = jnp.array(input_ub)
+    # n_u = params_model['n_u']
+    # Check if some bounds on u are present
+    has_ubound = 'input_constr' in params_model
+    input_lb, input_ub = None, None
+    if has_ubound:
+        print('Found input bound constraints...\n')
+        input_lb = [-jnp.inf for _ in range(n_u)]
+        input_ub =[jnp.inf for _ in range(n_u)]
+        input_dict = params_model['input_constr']
+        assert len(input_dict['input_id']) <= n_u and \
+                len(input_dict['input_id']) == len(input_dict['input_bound']),\
+                "The number of constrained inputs identifier does not match the number of bounds"
+        for idx, (u_lb, u_ub) in zip(input_dict['input_id'], input_dict['input_bound']):
+            input_lb[idx], input_ub[idx] = u_lb, u_ub
+        input_lb = jnp.array(input_lb)
+        input_ub = jnp.array(input_ub)
 
-#     # Check if bounds on the state are present
-#     has_xbound = 'state_constr' in params_model
-#     # By default we impose bounds constraint on the states using nonsmooth penalization
-#     slack_proximal, state_idx, penalty_coeff, state_lb, state_ub = False, None, None, None, None
-#     if has_xbound:
-#         print('Found states bound constraints...\n')
-#         slack_dict = params_model['state_constr']
-#         assert len(slack_dict['state_id']) <= n_x and \
-#                 len(slack_dict['state_id']) == len(slack_dict['state_bound']),\
-#                 'The number of the constrained states identifier does not match the number of bounds'
-#         state_idx = jnp.array(slack_dict['state_id'])
-#         slack_proximal = slack_dict['slack_proximal']
-#         penalty_coeff = slack_dict['state_penalty']
-#         state_lb = jnp.array([x[0] for x in slack_dict['state_bound']])
-#         state_ub = jnp.array([x[1] for x in slack_dict['state_bound']])
+    # Check if bounds on the state are present
+    has_xbound = 'state_constr' in params_model
+    # By default we impose bounds constraint on the states using nonsmooth penalization
+    slack_proximal, state_idx, penalty_coeff, state_lb, state_ub = False, None, None, None, None
+    if has_xbound:
+        print('Found states bound constraints...\n')
+        slack_dict = params_model['state_constr']
+        assert len(slack_dict['state_id']) <= n_x and \
+                len(slack_dict['state_id']) == len(slack_dict['state_bound']),\
+                'The number of the constrained states identifier does not match the number of bounds'
+        state_idx = jnp.array(slack_dict['state_id'])
+        slack_proximal = slack_dict['slack_proximal']
+        penalty_coeff = slack_dict['state_penalty']
+        state_lb = jnp.array([x[0] for x in slack_dict['state_bound']])
+        state_ub = jnp.array([x[1] for x in slack_dict['state_bound']])
 
-#     return (has_ubound, input_lb, input_ub), \
-#             (has_xbound, slack_proximal, state_idx, penalty_coeff, state_lb, state_ub )
+    return (has_ubound, input_lb, input_ub), \
+            (has_xbound, slack_proximal, state_idx, penalty_coeff, state_lb, state_ub )
 
 
 class ControlledSDE(hk.Module):
@@ -580,61 +578,65 @@ class ControlledSDE(hk.Module):
         return _error_data, jnp.mean(grad_norm), jnp.sum(sconvex), mu_coeff, extra
 
 
+    def sample_dynamics_with_cost(self, y, u, rng, cost_fn, slack_index=None, extra_dyn_args=None, extra_cost_args=None):
+        """Generate a function that integrate the sde dynamics augmented with a cost
+           function evolution (which is also integrated along the dynamics).
+           The cost function is generally the cost we want to minimize
+           in a typically Nonlinear MPC problem
 
-    # def sample_dynamics_with_cost(self, y, u, rng, cost_fn, slack_index=None, extra_dyn_args=None, 
-    #             extra_cost_args=None, prior_sampling=False):
-    #     """Generate a function that integrate the sde dynamics augmented with a cost
-    #        function evolution (which is also integrated along the dynamics).
-    #        The cost function is generally the cost we want to minimize
-    #        in a typically Nonlinear MPC problem
+        Args:
+            y (TYPE): The initial observation of the system
+            u (TYPE): The sequence of control signal applied to the system. This is an array
+            rng (TYPE): A random number generator key
+            cost_fn (TYPE): The cost function to be integrated along the dynamics
+            slack_index (None, optional): The index of the slack variable in the control signal
+            extra_dyn_args (None, optional): Extra arguments to be passed to the drift and diffusion functions
+            extra_cost_args (None, optional): Extra arguments to be passed to the cost function
 
-    #     Args:
-    #         ts (TYPE): The time indexes at which the integration happens
-    #         y (TYPE): The current observation of the system
-    #         u (TYPE): The sequence of control to applied at each time step (can be merged with slack)
-    #         rng (TYPE): A random key generator for Brownian noise
-    #         cost_fn (TYPE): The cost function to integrate
-    #                         cost_fn : (_x, _u, _slack)
+        """
 
-    #     Returns:
-    #         TYPE: The state's evolution as well as cost evolution along the trajectory
-    #     """
+        # Define the augmented dynamics
+        def cost_aug_drift(_aug_x, _u, extra_args=None):
+            _x = _aug_x[:-1]
+            actual_u = _u[:self.n_u]
+            drift_fn = self.compositional_drift
+            drift_pos_x = drift_fn(_x, actual_u, None if extra_dyn_args is None else extra_args[0])
+            slack_t = _u[self.n_u:] if _u.shape[0] > self.n_u else None
+            cost_term = cost_fn(_x, actual_u, slack_t, None if extra_cost_args is None else extra_args[-1])
+            return jnp.concatenate((drift_pos_x, jnp.array([cost_term])))
 
-    #     # Define the augmented dynamics
-    #     def cost_aug_drift(_aug_x, _u, extra_args=None):
-    #         _x = _aug_x[:-1]
-    #         actual_u = _u[:self.n_u]
-    #         drift_fn = self.prior_drift if prior_sampling else self.posterior_drift
-    #         drift_pos_x = drift_fn(_x, actual_u, None if extra_dyn_args is None else extra_args[0])
-    #         slack_t = _u[self.n_u:] if _u.shape[0] > self.n_u else None
-    #         # [TODO Franck] Maybe add time dependency ?
-    #         cost_term = cost_fn(_x, actual_u, slack_t, None if extra_cost_args is None else extra_args[-1])
-    #         return jnp.concatenate((drift_pos_x, jnp.array([cost_term])))
+        def cost_aug_diff(_aug_x, _u, extra_args=None):
+            _x = _aug_x[:-1]
+            diff_x = self.diffusion(_x, _u, None if extra_dyn_args is None else extra_args[0])
+            return jnp.concatenate((diff_x, jnp.array([0.])))
 
-    #     def cost_aug_diff(_aug_x, extra_args=None):
-    #         _x = _aug_x[:-1]
-    #         diff_x = self.prior_diffusion(_x, None if extra_dyn_args is None else extra_args[0])
-    #         return jnp.concatenate((diff_x, jnp.array([0.])))
+        # Define the augmented obs2state and state2obs functions
+        # The last element of the augmented state is the cost and is not affect by obs2state and state2obs
+        _temp_obs2state = lambda _y, _rng: jnp.concatenate((self.obs2state(_y[:-1], _rng), _y[-1:]))
+        _temp_state2obs = lambda _x, _rng: jnp.concatenate((self.state2obs(_x[:-1], _rng), _x[-1:]))
 
-    #     # Now convert the observation to a state and then integrate it
-    #     x =  self.obs2state(y, rng)
-    #     rng, rng_brownian = jax.random.split(rng)
+        # Solve the augmented integration problem
+        aug_y = jnp.concatenate((y, jnp.array([0.])) )
 
-    #     # Solve the augmented integration problem
-    #     aug_x = jnp.concatenate((x, jnp.array([0.])) )
+        # TODO: This is a hack because of setting the slacj value to the corresponding state value
+        # Transform y to state
+        xval = self.obs2state(y, rng)
 
-    #     # The slack variable should be initialized to the corresponding state values
-    #     # The slack variable are shifted -> The slack corresponding to the first time step is actually the last
-    #     # Because control time step and state time step are shifted
-    #     if slack_index is not None and u.shape[1] > self.n_u:
-    #         u = u.at[0,self.n_u:].set(x[slack_index])
+        # The slack variable should be initialized to the corresponding state values
+        # The slack variable are shifted -> The slack corresponding to the first time step is actually the last
+        # Because control time step and state time step are shifted
+        if slack_index is not None and u.shape[1] > self.n_u:
+            u = u.at[0,self.n_u:].set(xval[slack_index])
         
-    #     extra_scan_args = None if (extra_dyn_args is None and extra_cost_args is None) else \
-    #                         ( (extra_dyn_args, extra_cost_args) if extra_dyn_args is not None and extra_cost_args is not None else \
-    #                                 ( (extra_dyn_args,) if extra_dyn_args is not None else (extra_cost_args,)
-    #                                 )
-    #                         )
-    #     return self.sample_general(cost_aug_drift, cost_aug_diff, aug_x, u, rng_brownian, extra_scan_args)
+        extra_scan_args = None if (extra_dyn_args is None and extra_cost_args is None) else \
+                            ( (extra_dyn_args, extra_cost_args) if extra_dyn_args is not None and extra_cost_args is not None else \
+                                    ( (extra_dyn_args,) if extra_dyn_args is not None else (extra_cost_args,)
+                                    )
+                            )
+        
+        _, _yevol, _ = self.sample_general((_temp_obs2state, _temp_state2obs), cost_aug_drift, cost_aug_diff, aug_y, u, rng, extra_scan_args)
+        # return self.sample_general(cost_aug_drift, cost_aug_diff, aug_x, u, rng_brownian, extra_scan_args)
+        return _yevol
 
 
 def create_obs2state_fn(params_model, sde_constr=ControlledSDE, seed=0,
@@ -861,6 +863,10 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
     params_model.pop('long_step_dt', None)
     vprint ('Removed num_short_dt, short_step_dt, and long_step_dt from the model as they are not used in the loss and sde training')
 
+    # Now check if the diffusion is parameterized by a neural network
+    if 'diffusion_density_nn' not in params_model or 'density_nn' not in params_model['diffusion_density_nn']:
+        loss_params.pop('density_loss', None)
+
     # Now we insert the density loss parameters if they are not present
     if 'density_loss' in loss_params:
         params_model['density_loss'] = loss_params['density_loss']
@@ -1017,7 +1023,6 @@ def create_online_cost_sampling_fn(params_model,
                             params_mpc,
                             sde_constr= ControlledSDE,
                             seed=0,
-                            prior_sampling=False,
                             **extra_args_sde_constr):
     """Create a function that integrate the dynamics as well as a cost function to minimize.
        Typically, the cost function is the objective used in the underlying MPC problem
@@ -1070,6 +1075,7 @@ def create_online_cost_sampling_fn(params_model,
     # Transform the penalty coefficient into an array
     penalty_coeff = jnp.array(penalty_coeff) if penalty_coeff is not None else penalty_coeff
 
+    # Define the cost of penalizing the constraints using a nonsmooth function and penalty method
     def constr_cost_noprox(x_true, slack_x=None):
         """ Penalty method with nonsmooth cost fuction.
             This should be avoided when doing nonlinear MPC using accelerated gradient descent
@@ -1081,6 +1087,7 @@ def create_online_cost_sampling_fn(params_model,
         #[TODO Franck] Maybe mean/sum the error instead of doing a mean over states
         return jnp.sum(jnp.where( diff_x > 0, 1., 0.) * jnp.square(diff_x) * _penalty_coeff)
 
+    # The cost of penalizing the constraints using a smooth function and proximal method
     def constr_cost_withprox(x_true, slack_x):
         """ With proximal constraint on the slack variable -> smooth norm 2 regularization
         """
@@ -1153,7 +1160,7 @@ def create_online_cost_sampling_fn(params_model,
         # Compute the evolution of the state
         _aug_cost_fn = lambda x, u, slack, _extra_args: aug_cost_fn(x, u, slack, _cost_fn, _extra_args)
         x_evol = m_model.sample_dynamics_with_cost(y, opt_params, rng, _aug_cost_fn, state_idx,
-                            extra_dyn_args=extra_dyn_args, extra_cost_args=extra_cost_args, prior_sampling=prior_sampling)
+                            extra_dyn_args=extra_dyn_args, extra_cost_args=extra_cost_args)
 
         # Evaluate the cost_to_go function
         # [TODO Franck] probably a bug here when using ts.shape-1 optimization variable
@@ -1166,14 +1173,12 @@ def create_online_cost_sampling_fn(params_model,
             pen_cost = jnp.array(0.)
         # Compute the total cost by adding the terminal cost
         total_cost = pen_cost*time_steps[-1] + params_mpc['discount']*end_cost + x_evol[-1,-1]
-        # TODO: Make sure that this makes sense for other nodes
-        # return total_cost, x_evol[:,:-1]
 
         # Modified the cost to add the penalty with respect to constraints of the first state
         # x0_constr = 0. if not has_xbound else constr_cost_noprox(x_evol[0,:-1]) * time_steps[0]
         if has_xbound:
-            x_evol = x_evol.at[1:,-1].add(constr_cost_noprox(x_evol[0,:-1]) * time_steps[0]) # Only add it to the first time step -> The other are likely useless
-        # x_evol[1,-1] += x0_constr # Only add it to the first time step -> The other are likely useless
+            # Initial constraint cost -> This should be constant as the constr cost is only a function of the state
+            x_evol = x_evol.at[1:,-1].add(constr_cost_noprox(x_evol[0,:-1]) * time_steps[0])
 
         return total_cost, x_evol
 
@@ -1184,8 +1189,11 @@ def create_online_cost_sampling_fn(params_model,
         # This ensures that if there is a slack variable
         # the constraint are also enforced on the terminal state
         # num_var = params_model['horizon'] + (0 if has_slack else 1)
+        # TODO: Make a more general initialization that avoid infeasible control values
         num_var = params_model['horizon']
+        # Non-zero initialization for gradient descent to work properly for the control inputs
         zero_u = jnp.ones((num_var, n_u)) * 1e-4
+        # Non-zero initialization for gradient descent to work properly for the slack variables
         zero_x = jnp.ones((num_var, len(state_idx))) * 1e-4 if has_slack else None
 
         if u is not None and u.ndim == 1:

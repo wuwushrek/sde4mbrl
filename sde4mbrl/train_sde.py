@@ -33,6 +33,19 @@ def pick_dump(mdict, f):
     pickle.dump(mdict, f)
 
 
+def slice_obj(vobj, ind_min, ind_max=None, fn_to_apply=None):
+    """Slice an object with the indices given by the two integers
+        The object can be a tuple of nparray, an nparray, a list of nparray
+    """
+    fn_to_apply = fn_to_apply if fn_to_apply is not None else lambda x: x
+    if isinstance(vobj, tuple):
+        return tuple([fn_to_apply(v[ind_min:ind_max] if ind_max is not None else v[ind_min]) for v in vobj])
+    elif isinstance(vobj, list):
+        return [fn_to_apply(v[ind_min:ind_max] if ind_max is not None else v[ind_min]) for v in vobj]
+    elif isinstance(vobj, np.ndarray) or isinstance(vobj, jnp.ndarray):
+        return fn_to_apply(vobj[ind_min:ind_max] if ind_max is not None else vobj[ind_min])
+    
+
 def evaluate_sde_loss(loss_fn, m_params, data_eval, rng, test_batch_size):
     """Compute the metrics for evaluation accross the data set
 
@@ -49,13 +62,13 @@ def evaluate_sde_loss(loss_fn, m_params, data_eval, rng, test_batch_size):
 
     num_test_batches = data_eval['y'].shape[0] // test_batch_size
     # Useless array to determine the dtype of Jax
-    useless_array = jnp.array([0.0])
+    # useless_array = jnp.array([0.0])
 
     # Iterate over the test batches
     for n_i in tqdm(range(num_test_batches), leave=False):
         
         # Get the current batch
-        batch_current = { k : jnp.array(v[n_i*test_batch_size:(n_i+1)*test_batch_size], dtype=useless_array.dtype) for k, v in data_eval.items() }
+        batch_current = { k : slice_obj(v, n_i*test_batch_size, (n_i+1)*test_batch_size, fn_to_apply=jnp.array) for k, v in data_eval.items() }
 
         # Separate the batch in finite horizon subtrajectories
         rng, loss_rng = jax.random.split(rng)
@@ -100,19 +113,23 @@ def split_trajectories_into_transitions(data, horizon):
         data = { k : [_data[k] for _data in data ] for k in data[0].keys()}
 
     # Check the dimension
-    for _, v in data.items():
+    for _k, v in data.items():
         for _v in v:
-            assert _v.shape[0] >= horizon+1, "The horizon is too large for the data"
+            if _k == 'extra_args':
+                assert isinstance(_v, tuple), "The extra_args must be a dictionary"
+                assert _v[0].shape[0] >= horizon, "The horizon is too large for the data"
+                continue
+            assert _v.shape[0] >= horizon+1 if _k == 'y' else _v.shape[0] >= horizon, "The horizon is too large for the data"
     
     # Split the trajectories into transitions of fixed horizon
-    res_data = { k : np.array([_v[i:i+horizon+1] if k=='y' else _v[i:i+horizon] \
+    
+    res_data = { k : [_v[i:i+horizon+1] if k=='y' else slice_obj(_v, i, i+horizon) \
                                     for _k, _v in enumerate(v) \
                                         for i in range(data['y'][_k].shape[0]-(horizon+1))
-                                ]
-                            ) \
-                    for k, v in data.items()
+                    ] for k, v in data.items()
                 }
-    
+    # Now let's transform them into ndarrays depending on the type of the data
+    res_data = { k : np.array(v) if k != 'extra_args' else tuple([np.array([_v[tupKey] for _v in v]) for tupKey in range(len(v[0])) ]) for k, v in res_data.items()}
     return res_data
 
 
@@ -164,19 +181,21 @@ def train_model(params, train_data, test_data,
 
     # Split the dataset into chunk of fixed horizon according to the model horizon
     # Check if the data is a trajectory or a set of transitions
-    if train_data[0]['u'].shape[0] != params['model']['horizon']:
+    if any(_data['u'].shape[0] != params['model']['horizon'] for _data in train_data):
         assert train_data[0]['u'].shape[0] > params['model']['horizon'], 'The horizon is too large to split the trajectory'
         print ('[WARNING] The train data has a different horizon than the model. It will be split into transitions')
         train_data = split_trajectories_into_transitions(train_data, params['model']['horizon'])
     else:
-        train_data = { k : np.array([_data[k] for _data in train_data]) for k in train_data[0].keys()}
+        train_data = { k : [_data[k] for _data in train_data] for k in train_data[0].keys()}
+        train_data = {k : np.array(v) if k != 'extra_args' else tuple([np.array([_v[tupKey] for _v in v]) for tupKey in range(len(v[0])) ]) for k, v in train_data.items()}
     
-    if test_data[0]['u'].shape[0] != params['model']['horizon']:
+    if any(_data['u'].shape[0] != params['model']['horizon'] for _data in test_data):
         assert test_data[0]['u'].shape[0] > params['model']['horizon'], 'The horizon is too large to split the trajectory'
         print ('[WARNING] The test data has a different horizon than the model. It will be split into transitions')
         test_data = split_trajectories_into_transitions(test_data, params['model']['horizon'])
     else:
-        test_data = { k : np.array([_data[k] for _data in test_data]) for k in test_data[0].keys()}
+        test_data = { k : [_data[k] for _data in test_data] for k in test_data[0].keys()}
+        test_data = {k : np.array(v) if k != 'extra_args' else tuple([np.array([_v[tupKey] for _v in v]) for tupKey in range(len(v[0])) ]) for k, v in test_data.items()}
 
     # Check if the train data size with respect to the batch size
     if train_data['y'].shape[0] < train_batch_size:
@@ -287,7 +306,7 @@ def train_model(params, train_data, test_data,
         return (test_cost + train_cost) < (opt_test_cost + opt_train_cost)
 
     # Useless array to determine the dtype of Jax
-    useless_array = jnp.array([0.0])
+    # useless_array = jnp.array([0.0])
 
     # Start the iteration loop
     for epoch in tqdm(range(trainer_params['nepochs'])):
@@ -300,7 +319,8 @@ def train_model(params, train_data, test_data,
 
             # Generate the batch data
             batch_idx = m_numpy_rng.choice(train_data['y'].shape[0], train_batch_size, replace=False)
-            batch_data = {k : jnp.array(train_data[k][batch_idx], dtype=useless_array.dtype) for k in train_data.keys()}
+            batch_data = {k : slice_obj(train_data[k], batch_idx, fn_to_apply=jnp.array) for k in train_data.keys()}
+            # batch_data = {k : jnp.array(train_data[k][batch_idx], dtype=useless_array.dtype) for k in train_data.keys()}
 
             # Initialize Log just in case
             log_data_train = dict()
