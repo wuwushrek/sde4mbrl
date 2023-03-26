@@ -260,7 +260,7 @@ class ControlledSDE(hk.Module):
         self.noise_outputs = jnp.array(self.params['diffusion_density_nn'].get('indx_noise_out', jnp.arange(self.n_x)))
 
         # Define the function that concatenates the state and control input if needed for the density NN
-        self.noise_relevant_state = lambda _x : self.reduced_state(_x[self.noise_inputs]) if self.noise_inputs.shape[0] < self.n_x else self.reduced_state(_x)
+        self.noise_relevant_state = lambda _x : self.reduced_state(_x)[self.noise_inputs] if self.noise_inputs.shape[0] < self.n_x else self.reduced_state(_x)
         self.noise_aug_state_ctrl = lambda _x, _u : jnp.concatenate([self.noise_relevant_state(_x), _u], axis=-1) if self.params.get('control_dependent_noise', False) else self.noise_relevant_state(_x)
         self.noise_aug_output = lambda _z : jnp.ones(self.n_x).at[self.noise_outputs].set(_z) if self.noise_outputs.shape[0] < self.n_x else _z
         
@@ -531,6 +531,7 @@ class ControlledSDE(hk.Module):
 
         # Get indexes of the samples to consider in the norm 2 computation between the estimated and the measured observation
         # This essentially make the fitting similar to a time series with irregular sampling
+        _indx = None
         if 'num_sample2consider' in self.params:
             # rng_sample2consider = jnp.array([0, 0], dtype=jnp.uint32)
             if self.params['num_sample2consider'] < ynext.shape[0]:
@@ -543,7 +544,7 @@ class ControlledSDE(hk.Module):
         # Compute the error between the estimated and the measured observation
         # We sum the error over the integration horizon and then average over the number of coordinates
         # _error_data = jnp.mean(jnp.sum(jnp.square(meas_y-ynext), axis=0))
-        _error_data = jnp.sum(jnp.square(meas_y-ynext))
+        _error_data = jnp.sum(jnp.square((meas_y-ynext) / jnp.array(self.params.get('obs_weights', 1.0))))
 
         # Extra values to print or to penalize the loss function on
         extra = {}
@@ -570,9 +571,16 @@ class ControlledSDE(hk.Module):
         mu_coeff = get_mu_coeff()
         rng_density = jax.random.split(rng_density, ymeas.shape[0]-1)
         
+        den_yinput = ymeas[:-1]
+        den_uinput = uVal
+        if _indx is not None and self.params.get('density_on_partial', False):
+            den_yinput = den_yinput[_indx]
+            den_uinput = den_uinput[_indx]
+            rng_density = rng_density[_indx]
+
         # TODO: Not ymeas but xmeas
         # Get the gradient and the convex loss
-        grad_norm, sconvex = jax.vmap(lambda _y, _u, _rng: self.density_loss(_y, _u, _rng, mu_coeff))(ymeas[:-1], uVal, rng_density)
+        grad_norm, sconvex = jax.vmap(lambda _y, _u, _rng: self.density_loss(_y, _u, _rng, mu_coeff))(den_yinput, den_uinput, rng_density)
         
         # Error on prediction, Gradient error, strong convexity error, mu_coeff, and extra values
         return _error_data, jnp.mean(grad_norm), jnp.sum(sconvex), mu_coeff, extra
@@ -849,6 +857,12 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
     # Extract the number of 
     if 'num_sample2consider' in loss_params:
         params_model['num_sample2consider'] = loss_params['num_sample2consider']
+    
+    if 'obs_weights' in loss_params:
+        params_model['obs_weights'] = loss_params['obs_weights']
+    
+    if 'density_on_partial' in loss_params:
+        params_model['density_on_partial'] = loss_params['density_on_partial']
 
     # Print the number of particles used for the loss
     vprint('Using [ N = {} ] particles for the loss'.format(num_sample))
@@ -1007,7 +1021,7 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
         yevol_mean = jnp.mean(yevol, axis=1)
 
         # Compute the error in the prediction wrt y
-        error_data = jnp.mean(jnp.sum(jnp.sum(jnp.square(y - yevol_mean), axis=-1), axis=-1))
+        error_data = jnp.mean(jnp.sum(jnp.sum(jnp.square((y - yevol_mean) / jnp.array(loss_params.get('obs_weights', 1.0))), axis=-1), axis=-1))
 
         # Compute the standard deviation of the prediction
         yevol_std = jnp.std(yevol, axis=1)
