@@ -428,12 +428,12 @@ class ControlledSDE(hk.Module):
             _ = obs2state_fns[1](x0, rng_brownian)
             # Initialize the drift and diffusion parameters
             _ = drift_term(x0, uVal if uVal.ndim ==1 else uVal[0], extra_scan_args)
-            _ = diff_term(x0, extra_scan_args)
+            _ = diff_term(x0, uVal if uVal.ndim ==1 else uVal[0], extra_scan_args)
 
             #[TODO Franck] Maybe make the return type to be the same after sde_solve
             #Fine if the returned types are different at initilization
             # 2D array to be similar with sde_solve
-            return jnp.zeros_like(x0)[None], jnp.zeros_like(y0)[None], jnp.zeros_like(uVal)[None]
+            return jnp.zeros((self.params['horizon']+1, self.n_x)), jnp.zeros((self.params['horizon']+1, self.n_y)), jnp.zeros((self.params['horizon'], self.n_u))
         else:
             # Solve the sde and return its output (latent space)
             return self.sde_solve(obs2state_fns, self.time_step, y0, uVal, 
@@ -518,16 +518,41 @@ class ControlledSDE(hk.Module):
 
         # Check if the trajectory horizon matches
         assert ymeas.shape[0] == uVal.shape[0]+1, 'Trajectory horizon must match'
+        num_steps2data = self.params['num_steps2data']
+        assert  self.params['horizon'] * num_steps2data == uVal.shape[0], 'Trajectory horizon must match'
 
         # Split the random number generator
         rng_brownian, rng_sample2consider, rng_density = jax.random.split(rng, 3)
 
+        # uval is size (horizon * num_steps2data, num_ctrl), lets reshape it to (horizon, num_steps2data, num_ctrl)
+        u_values = uVal.reshape((self.params['horizon'], num_steps2data, self.params['n_u']))
+        # Let's get the actual y_values
+        y_values = ymeas[::num_steps2data]
+        # How do we pick u_values? Different strategies stored in params['u_sampling_strategy']
+        # By default we pick the first control value, i.e. u_values[:,0,:]
+        # Another strategie is the mean of all the control values, i.e. u_values.mean(axis=1)
+        # Another strategie is the median of all the control values, i.e. jnp.median(u_values, axis=1)
+        # Another strategie is a random control value
+        u_sampling_strategy = self.params.get('u_sampling_strategy', 'first')
+        if u_sampling_strategy == 'first':
+            u_values = u_values[:,0,:]
+        elif u_sampling_strategy == 'mean':
+            u_values = u_values.mean(axis=1)
+        elif u_sampling_strategy == 'median':
+            u_values = jnp.median(u_values, axis=1)
+        elif u_sampling_strategy == 'random':
+            rng_density, rng_u = jax.random.split(rng_density)
+            rnd_indx = jax.random.randint(rng_u, shape=(self.params['horizon'],), minval=0, maxval=num_steps2data)
+            u_values = u_values[jnp.arange(self.params['horizon']), rnd_indx, :]
+        else:
+            raise ValueError('Unknown u_sampling_strategy: {}. Choose from first, mean, median, random'.format(u_sampling_strategy))
+
         # Solve the SDE to obtain state and observation evolution
-        y0 = ymeas[0]
-        _, ynext, _ = self.sample_sde(y0, uVal, rng_brownian, extra_scan_args)
+        y0 = y_values[0]
+        _, ynext, _ = self.sample_sde(y0, u_values, rng_brownian, extra_scan_args)
 
         # Extract the state (ignore the initial state) and the KL divergence
-        ynext, meas_y = ynext[1:], ymeas[1:]
+        ynext, meas_y = ynext[1:], y_values[1:]
 
         # Get indexes of the samples to consider in the norm 2 computation between the estimated and the measured observation
         # This essentially make the fitting similar to a time series with irregular sampling
@@ -574,11 +599,10 @@ class ControlledSDE(hk.Module):
         den_yinput = ymeas[:-1]
         den_uinput = uVal
         if _indx is not None and self.params.get('density_on_partial', False):
-            den_yinput = den_yinput[_indx]
-            den_uinput = den_uinput[_indx]
+            den_yinput = y_values[:-1][_indx]
+            den_uinput = u_values[_indx]
             rng_density = rng_density[_indx]
 
-        # TODO: Not ymeas but xmeas
         # Get the gradient and the convex loss
         grad_norm, sconvex = jax.vmap(lambda _y, _u, _rng: self.density_loss(_y, _u, _rng, mu_coeff))(den_yinput, den_uinput, rng_density)
         
@@ -842,10 +866,6 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
     # Deep copy params_model
     params_model = model_params
 
-    rng_zero = jax.random.PRNGKey(loss_params.get('seed', 0))
-    yzero = jnp.zeros((2,params_model['n_y']))
-    uzero = jnp.zeros((1,params_model['n_u'],))
-
     # The number of samples is given by the loss dictionary -> If not present, use the default value from the params-model
     num_sample = loss_params.get('num_particles', params_model.get('num_particles', 1) )
     params_model['num_particles'] = num_sample
@@ -853,6 +873,32 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
     # The step size is given by the loss dictionary -> If not present, use the default value from the params-model
     step_size = loss_params.get('stepsize', params_model['stepsize'] )
     params_model['stepsize'] = step_size
+
+    # Now let's get the data stepsize from the loss dictionary -> If not present, use the default value is the step_size
+    data_stepsize = loss_params.get('data_stepsize', step_size)
+    # Let's check if the stepsize is a multiple of the data_stepsize
+    if abs (step_size - data_stepsize) <= 1e-6:
+        num_steps2data = 1
+    else:
+        assert abs(step_size % data_stepsize) <= 1e-6, 'The data stepsize must be a multiple of the stepsize'
+        # Let's get the number of steps between data points
+        num_steps2data = int((step_size/data_stepsize) +0.5) # Hack to avoid numerical issues
+    # Let's get the horizon of the loss
+    horizon = loss_params.get('horizon', params_model.get('horizon', 1))
+    # Let's get the actual actual horizon of the loss
+    data_horizon = horizon * num_steps2data
+    # Let's set the horizon in the params_model
+    params_model['horizon'] = horizon
+    params_model['num_steps2data'] = num_steps2data
+    loss_params['data_horizon'] = data_horizon
+    # Print the number of particles used for the loss
+    vprint('Using [ N = {} ] particles for the loss'.format(num_sample))
+    # Print the horizon used for the loss
+    vprint('Using [ T = {} ] horizon for the loss'.format(params_model['horizon']))
+    # Print the stepsize used for the loss
+    vprint('Using [ dt = {} ] stepsize for the loss'.format(params_model['stepsize']))
+    # Print the number of steps between data points
+    vprint('Using [ num_steps2data = {} ] steps between data points'.format(num_steps2data))
 
     # Extract the number of 
     if 'num_sample2consider' in loss_params:
@@ -863,13 +909,9 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
     
     if 'density_on_partial' in loss_params:
         params_model['density_on_partial'] = loss_params['density_on_partial']
-
-    # Print the number of particles used for the loss
-    vprint('Using [ N = {} ] particles for the loss'.format(num_sample))
-    # Get the horizon from params_loss -> if not present, use the default value from params_model
-    params_model['horizon'] = loss_params.get('horizon', params_model.get('horizon', 1))
-    # Print the horizon used for the loss
-    vprint('Using [ T = {} ] horizon for the loss'.format(params_model['horizon']))
+    
+    if 'u_sampling_strategy' in loss_params:
+        params_model['u_sampling_strategy'] = loss_params['u_sampling_strategy']
 
     # We remove num_short_dt, short_step_dt, and long_step_dt from the model as they are not used in the loss
     params_model.pop('num_short_dt', None)
@@ -895,6 +937,10 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
     def sample_loss(y, u, rng, extra_args=None):
         m_model = sde_constr(params_model, **extra_args_sde_constr)
         return m_model.sample_for_loss_computation(y, u, rng, extra_args)
+    
+    rng_zero = jax.random.PRNGKey(loss_params.get('seed', 0))
+    yzero = jnp.zeros((data_horizon+1,params_model['n_y']))
+    uzero = jnp.zeros((data_horizon,params_model['n_u'],))
 
     # Transform the function into a pure one
     sampling_pure =  hk.without_apply_rng(hk.transform(sample_loss))
@@ -1008,15 +1054,41 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
         # CHeck if rng is given as  a ingle key
         assert rng.ndim == 1, 'THe rng key is splitted inside the loss function computation'
 
+        # uval is size (horizon * num_steps2data, num_ctrl), lets reshape it to (horizon, num_steps2data, num_ctrl)
+        u_values = u.reshape((u.shape[0], params_model['horizon'], num_steps2data, params_model['n_u']))
+        # Let's get the actual y_values
+        y_values = y[:,::num_steps2data,:]
+        # How do we pick u_values? Different strategies stored in params['u_sampling_strategy']
+        # By default we pick the first control value, i.e. u_values[:,0,:]
+        # Another strategie is the mean of all the control values, i.e. u_values.mean(axis=1)
+        # Another strategie is the median of all the control values, i.e. jnp.median(u_values, axis=1)
+        # Another strategie is a random control value
+        u_sampling_strategy = params_model.get('u_sampling_strategy', 'first')
+        if u_sampling_strategy == 'first':
+            u_values = u_values[:,:,0,:]
+        elif u_sampling_strategy == 'mean':
+            u_values = u_values.mean(axis=2)
+        elif u_sampling_strategy == 'median':
+            u_values = jnp.median(u_values, axis=2)
+        elif u_sampling_strategy == 'random':
+            rng, rng_u = jax.random.split(rng)
+            rnd_indx = jax.random.randint(rng_u, shape=(params_model['horizon'],), minval=0, maxval=num_steps2data)
+            # Now we have to do a fancy indexing, taking into account the batch size on first dimension
+            u_values = u_values[:, jnp.arange(params_model['horizon']), rnd_indx, :]
+
+        else:
+            raise ValueError('Unknown u_sampling_strategy: {}. Choose from first, mean, median, random'.format(u_sampling_strategy))
+
         # Split the rng key first
         rng = jax.random.split(rng, y.shape[0])
 
+        # Re-assign y and u
+        y = y_values
+        u = u_values
         # Do multiple step prediction of state and compute the logprob and KL divergence
         batch_vmap = jax.vmap(multi_sampling_sde, in_axes=(None, 0, 0, 0, 0) if extra_args is not None else (None, 0, 0, 0, None))
         _, yevol, _ = batch_vmap(_nn_params, y[:, 0, :], u, rng, extra_args)
 
-        # Compute the error in the prediction y is of size (batch, horizon, dim), yevol is of size (batch, num_particles, horizon, dim)
-        
         # Compute the mean of the prediction
         yevol_mean = jnp.mean(yevol, axis=1)
 

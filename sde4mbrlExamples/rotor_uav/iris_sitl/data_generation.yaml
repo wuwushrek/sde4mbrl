@@ -1,20 +1,21 @@
+# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python sde_rotor_model.py --fun gen_traj --cfg iris_sitl/data_generation.yaml
 # Directory where to save the data and the model
 vehicle_dir: ~/Documents/sde4mbrl/sde4mbrlExamples/rotor_uav/iris_sitl
 outfile: trajs
 
 # Path the the log data
 train_trajectory:
-  - ~/Documents/log_flights/iris_sitl_0.ulg
   - ~/Documents/log_flights/iris_sitl_1.ulg
   - ~/Documents/log_flights/iris_sitl_2.ulg
+  - ~/Documents/log_flights/iris_sitl_3.ulg
   # More trajectories if available
 
 # Testing trajectory
 test_trajectory:
-  - ~/Documents/log_flights/iris_sitl_test.ulg
+  - ~/Documents/log_flights/iris_sitl_3.ulg
 
 # Criteria for parsing the trajectories based on minmax conditions
 criteria:
-  TRAJ_MIN_LEN: 500 # The minimum length for a trajectory after splitting under the state criteria below 
+  TRAJ_MIN_LEN: 500 # The minimum length for a trajectory after splitting under the state criteria below
   states: # The states for which to impose constraints when parsing the dta
-    z: [0.3, 5.0] # min max value to include while training
+    z: [0.1, 5.0] # min max value to include while training

@@ -73,7 +73,7 @@ def reset_env(rng):
 
     # Target state
     xtarget = None
-    if state_from_traj is None: # This happen when a trajectory is not given but it is a step 
+    if state_from_traj is None: # This happen when a trajectory is not given but it is a step
         # Get the initial state and the target state
         # x_, y_, z_ = x_init[:3]
         xtarget_, ytarget_, ztarget_, yaw_target_ = jnp.array(cfg_dict['sim_scen']['pos_goal']) + jax.random.normal(rng_next, (4,)) * jnp.array(cfg_dict['sim_scen']['pos_goal_std'])
@@ -154,7 +154,7 @@ m_rng = jax.random.PRNGKey(2050)
 apg_opt_sol, targetSp = play_policy(cfg_dict['sim_scen']['num_steps'], m_rng)
 
 # Plot the results
-state_label = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'q0', 'q1', 'q2', 'q3', 'wx', 'wy', 'wz', 'Thrust', 'Mx', 'My', 'Mz']
+state_label = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'q0', 'q1', 'q2', 'q3', 'wx', 'wy', 'wz', 'M1', 'M2', 'M3', 'M4']
 
 state_evol_ = np.array(apg_opt_sol['state'])
 u_evol = np.array(apg_opt_sol['u'])

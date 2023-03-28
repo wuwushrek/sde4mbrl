@@ -10,7 +10,8 @@ import optax
 # from jaxopt import ArmijoSGD
 
 from sde4mbrlExamples.rotor_uav.sde_rotor_model import SDERotorModel
-from sde4mbrlExamples.rotor_uav.utils import apply_fn_to_allleaf, load_yaml, parse_ulog
+from sde4mbrlExamples.rotor_uav.utils import  parse_ulog
+from sde4mbrl.utils import apply_fn_to_allleaf, load_yaml
 
 # This requires extra library to be installed
 from sde4mbrlExamples.rotor_uav.smoothing_data import filter_data
@@ -199,7 +200,7 @@ def init_data(log_dir, cutoff_freqs, force_filtering=False):
 
     # Ordered state names
     name_states = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'qw', 'qx', 'qy', 'qz', 'wx', 'wy', 'wz']
-    name_controls = ['tb', 'mx', 'my', 'mz']
+    name_controls = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6']
     _reduced_cutoff_freqs = {k : cutoff_freqs[k] for k in name_states}
 
     # Filter the data as described in filter_data_analysis.ipynb
@@ -227,7 +228,7 @@ def init_data(log_dir, cutoff_freqs, force_filtering=False):
         x = np.stack([log_data_dot[_name] for _name in name_states], axis=1)
 
         # Build the control action ndarray
-        u = np.stack([log_data[_name] for _name in name_controls], axis=1)
+        u = np.stack([log_data[_name] for _name in name_controls if _name in log_data], axis=1)
 
         # Print the size of the data
         tqdm.write('Size of the data : {}'.format(x.shape))
@@ -263,7 +264,8 @@ def create_loss_function(prior_model_params, loss_weights, seed=0):
     vector_field_pred_fn = hk.without_apply_rng(hk.transform(vector_field_pred))
 
     # Initialize the parameters of the vector field predictor
-    vector_field_pred_params = vector_field_pred_fn.init(seed, np.zeros((13,)), np.zeros((4,)))
+    nx, nu = prior_model_params['n_x'], prior_model_params['n_u']
+    vector_field_pred_params = vector_field_pred_fn.init(seed, np.zeros((nx,)), np.zeros((nu,)))
 
     # The initial parameters of the model are stored in prior_model_params['init_params'
     init_params = prior_model_params.get('init_params', {})
@@ -346,6 +348,9 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
     logs_dir = cfg_train['logs_dir']
     print('\nPath to the ulog files')
 
+    # Number of states and inputs
+    nx, nu, ny = cfg_train['n_x'], cfg_train['n_u'], cfg_train['n_y']
+
     # Load the data from the ulog file
     full_data = list()
     for log_dir in tqdm(logs_dir):
@@ -356,6 +361,9 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
             # warn the user that the data could not be loaded
             tqdm.write('WARNING: The following trajectory was empty: {}'.format(log_dir))
             continue
+        # CHeck that the number of states and inputs is correct
+        assert _data['x'].shape[1] == nx, 'The number of states is not correct'
+        assert _data['u'].shape[1] == nu, 'The number of inputs is not correct'
         full_data.append(_data)
     
     # Merge the data from full_data
@@ -365,6 +373,9 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
     test_traj_dir = cfg_train['test_trajectory']
     test_traj_data = init_data(test_traj_dir, cutoff_freqs, force_filtering=cfg_train['force_filtering'])
     assert test_traj_data is not None, 'The test trajectory data could not be loaded'
+    # CHeck that the number of states and inputs is correct
+    assert test_traj_data['x'].shape[1] == nx, 'The number of states in test trajectory is not correct'
+    assert test_traj_data['u'].shape[1] == nu, 'The number of inputs in test trajectory is not correct'
     
     # Random number generator for numpy variables
     seed = cfg_train['seed']
@@ -378,9 +389,9 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
 
     # Load the prior model parameters
     init_params = cfg_train['init_params']
-    if fm_model is not None:
-        init_params['fm_model'] = fm_model
-    fm_model = init_params['fm_model']
+    # if fm_model is not None:
+    #     init_params['fm_model'] = fm_model
+    # fm_model = init_params['fm_model']
 
     # Prettu print the prior model parameters
     print('\nPrior model parameters')
@@ -388,7 +399,8 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
         print('\t - {} : {}'.format(k, v))
     
     # Define the prior param models
-    prior_model_params = {'init_params' : init_params, 'horizon' : 1, 'stepsize' : 0.01}
+    prior_model_params = {'init_params' : init_params, 'horizon' : 1, 'stepsize' : 0.01, 
+                            'n_x' : nx, 'n_u' : nu, 'n_y' : ny} 
 
     # Create the hk parameters and the loss function
     pb_params, loss_fun, _ = \
@@ -518,26 +530,26 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
     output_dir = '{}/my_models/'.format(m_file_path)
 
     # Output file and if None, use the current data and time
-    out_data_file = output_file+'_'+fm_model if output_file is not None else \
-        'static_model_{}_{}'.format(fm_model, datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S"))
+    out_data_file = output_file if output_file is not None else \
+        'static_model_{}'.format(datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S"))
     
     # get_all_leaf_dict
-    def save_learned_params():
+    def save_learned_params(_opt_params):
         # Save the initial parameters in a yaml file
         with open(output_dir+out_data_file+'.yaml', 'w') as params_outfile:
-            converted_params = {**init_params, **convert_dict_jnp_to_dict_list(get_all_leaf_dict(opt_params_dict))}
+            converted_params = {**init_params, **convert_dict_jnp_to_dict_list(get_all_leaf_dict(_opt_params))}
             # Add the prior parameters
             save_dict = {'learned' : converted_params, 'prior' : init_params}
             yaml.dump(save_dict, params_outfile)
 
-    # Open the info file to save the parameters information
-    outfile = open(output_dir+out_data_file+'_info.txt', 'w')
-    outfile.write('Training parameters: \n{}'.format(m_parameters_dict))
-    outfile.write('\n////// Command line messages \n\n')
-    outfile.close()
+    # # Open the info file to save the parameters information
+    # outfile = open(output_dir+out_data_file+'_info.txt', 'w')
+    # outfile.write('Training parameters: \n{}'.format(m_parameters_dict))
+    # outfile.write('\n////// Command line messages \n\n')
+    # outfile.close()
 
     # Save the initial parameters in a yaml file
-    save_learned_params()
+    save_learned_params(opt_params_dict)
     
     # Iterate through the epochs
     training_params = cfg_train['training']
@@ -619,9 +631,12 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
                 _test_res = eval_test_fn(pb_params)
 
                 # First time we have a value for the loss function
-                if itr_count == 1 or (opt_variables['total_loss'] >= _test_res['total_loss']):
+                curr_improv_loss = _test_res['total_loss'] + _train_res['total_loss'] * training_params.get('TrainCoeff', 0.0)
+                # improv_cond = opt_variables['total_loss'] >= 
+                if itr_count == 1 or (opt_variables['total_loss'] >= curr_improv_loss):
                     opt_params_dict = pb_params
                     opt_variables = _test_res
+                    opt_variables['total_loss'] = curr_improv_loss
                     count_epochs_no_improv = 0
 
                 fill_dict(log_data, _train_res, 'Train', '{:.3e}')
@@ -654,11 +669,11 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
                 # Save all the obtained data
                 log_data_list.append(log_data)
 
-                # Save these info of the console in a text file
-                outfile = open(output_dir+out_data_file+'_info.txt', 'a')
-                outfile.write(print_str_test)
-                outfile.write(print_str)
-                outfile.close()
+                # # Save these info of the console in a text file
+                # outfile = open(output_dir+out_data_file+'_info.txt', 'a')
+                # outfile.write(print_str_test)
+                # outfile.write(print_str)
+                # outfile.close()
 
             last_iteration = (epoch == training_params['nepochs']-1 and i == num_evals_per_epoch-1)
             last_iteration |= (count_epochs_no_improv > training_params['patience'])
@@ -677,7 +692,7 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
                 pickle.dump(m_dict_res, outfile)
                 outfile.close()
 
-                save_learned_params()
+                save_learned_params(opt_params_dict)
 
             if last_iteration:
                 break

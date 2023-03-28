@@ -181,18 +181,18 @@ def train_model(params, train_data, test_data,
 
     # Split the dataset into chunk of fixed horizon according to the model horizon
     # Check if the data is a trajectory or a set of transitions
-    if any(_data['u'].shape[0] != params['model']['horizon'] for _data in train_data):
-        assert train_data[0]['u'].shape[0] > params['model']['horizon'], 'The horizon is too large to split the trajectory'
+    if any(_data['u'].shape[0] != params['sde_loss']['data_horizon'] for _data in train_data):
+        assert train_data[0]['u'].shape[0] > params['sde_loss']['data_horizon'], 'The horizon is too large to split the trajectory'
         print ('[WARNING] The train data has a different horizon than the model. It will be split into transitions')
-        train_data = split_trajectories_into_transitions(train_data, params['model']['horizon'])
+        train_data = split_trajectories_into_transitions(train_data, params['sde_loss']['data_horizon'])
     else:
         train_data = { k : [_data[k] for _data in train_data] for k in train_data[0].keys()}
         train_data = {k : np.array(v) if k != 'extra_args' else tuple([np.array([_v[tupKey] for _v in v]) for tupKey in range(len(v[0])) ]) for k, v in train_data.items()}
     
-    if any(_data['u'].shape[0] != params['model']['horizon'] for _data in test_data):
-        assert test_data[0]['u'].shape[0] > params['model']['horizon'], 'The horizon is too large to split the trajectory'
+    if any(_data['u'].shape[0] != params['sde_loss']['data_horizon'] for _data in test_data):
+        assert test_data[0]['u'].shape[0] > params['sde_loss']['data_horizon'], 'The horizon is too large to split the trajectory'
         print ('[WARNING] The test data has a different horizon than the model. It will be split into transitions')
-        test_data = split_trajectories_into_transitions(test_data, params['model']['horizon'])
+        test_data = split_trajectories_into_transitions(test_data, params['sde_loss']['data_horizon'])
     else:
         test_data = { k : [_data[k] for _data in test_data] for k in test_data[0].keys()}
         test_data = {k : np.array(v) if k != 'extra_args' else tuple([np.array([_v[tupKey] for _v in v]) for tupKey in range(len(v[0])) ]) for k, v in test_data.items()}

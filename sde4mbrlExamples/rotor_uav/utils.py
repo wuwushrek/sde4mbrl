@@ -1,7 +1,7 @@
 import numpy as np
 
-import copy
-import collections
+# import copy
+# import collections
 import os
 
 ################################ Qauternion and Conversion Utilities ################################
@@ -201,21 +201,21 @@ frd_to_flu_conversion = flu_to_frd_conversion
 
 ############################ Loading trajectories utilities ############################
 
-def load_yaml(config_path):
-    """Load the yaml file
+# def load_yaml(config_path):
+#     """Load the yaml file
 
-    Args:
-        config_path (str): The path to the yaml file
+#     Args:
+#         config_path (str): The path to the yaml file
 
-    Returns:
-        dict: The dictionary containing the yaml file
-    """
-    import yaml
-    yml_file = open(os.path.expanduser(config_path))
-    yml_byte = yml_file.read()
-    cfg_train = yaml.load(yml_byte, yaml.SafeLoader)
-    yml_file.close()
-    return cfg_train
+#     Returns:
+#         dict: The dictionary containing the yaml file
+#     """
+#     import yaml
+#     yml_file = open(os.path.expanduser(config_path))
+#     yml_byte = yml_file.read()
+#     cfg_train = yaml.load(yml_byte, yaml.SafeLoader)
+#     yml_file.close()
+#     return cfg_train
 
 def load_trajectory(filename):
     """ Load the trajectory from a csv file
@@ -230,37 +230,37 @@ def load_trajectory(filename):
         dict_traj[key] = np.array(dict_traj[key])
     return dict_traj
 
-def update_params(d, u):
-    """Update a dictionary with multiple levels
+# def update_params(d, u):
+#     """Update a dictionary with multiple levels
 
-    Args:
-        d (TYPE): The dictionary to update
-        u (TYPE): The dictionary that contains keys/values to add to d
+#     Args:
+#         d (TYPE): The dictionary to update
+#         u (TYPE): The dictionary that contains keys/values to add to d
 
-    Returns:
-        TYPE: The modified dictionary d
-    """
-    d = copy.deepcopy(d)
-    for k, v in u.items():
-        if isinstance(v, collections.abc.Mapping):
-            d[k] = update_params(d.get(k, {}), v)
-        else:
-            d[k] = v
-    return d
+#     Returns:
+#         TYPE: The modified dictionary d
+#     """
+#     d = copy.deepcopy(d)
+#     for k, v in u.items():
+#         if isinstance(v, collections.abc.Mapping):
+#             d[k] = update_params(d.get(k, {}), v)
+#         else:
+#             d[k] = v
+#     return d
 
-def apply_fn_to_allleaf(fn_to_apply, types_change, dict_val):
-    """Apply a function to all the leaf of a dictionary
-    """
-    res_dict = {}
-    for k, v in dict_val.items():
-        # if the value is a dictionary, convert it recursively
-        if isinstance(v, dict):
-            res_dict[k] = apply_fn_to_allleaf(fn_to_apply, types_change, v)
-        elif isinstance(v, types_change):
-            res_dict[k] = fn_to_apply(v)
-        else:
-            res_dict[k] = v
-    return res_dict
+# def apply_fn_to_allleaf(fn_to_apply, types_change, dict_val):
+#     """Apply a function to all the leaf of a dictionary
+#     """
+#     res_dict = {}
+#     for k, v in dict_val.items():
+#         # if the value is a dictionary, convert it recursively
+#         if isinstance(v, dict):
+#             res_dict[k] = apply_fn_to_allleaf(fn_to_apply, types_change, v)
+#         elif isinstance(v, types_change):
+#             res_dict[k] = fn_to_apply(v)
+#         else:
+#             res_dict[k] = v
+#     return res_dict
 
 def find_consecutive_true(metrics, min_length=-1):
     """Return the set of indices of minimum length 'min_length' for which
@@ -313,13 +313,21 @@ def parse_ulog(ulog_file, topic='mpc_full_state', outlier_cond=lambda d : d['z']
 
     res_dict['t'] = msg.data['timestamp_sample'] / 1e6
     # # Compute the delta time
-    # res_dict['dt'] = np.mean(res_dict['t'][1:] - res_dict['t'][:-1])
+    time_step = res_dict['t'][1:] - res_dict['t'][:-1]
+    # Print the mean time step and the standard deviation
+    print("Mean time step: {:.3f} s".format(np.mean(time_step)))
+
     # Save each fill of the message
     for msgname, msgdata in msg.data.items():
         # Pass the timestamp and timestamp_sample fields
         if msgname in ['timestamp', 'timestamp_sample']:
             continue
-        res_dict[msgname] = np.array(msgdata)
+        msg_array = np.array(msgdata)
+        if np.any(np.isnan(msg_array)):
+            print("Warning: {} contains NaN values -> We removed it.".format(msgname))
+            continue
+        res_dict[msgname] = msg_array
+    
     # Let's do some conversion
     # Check if x,y,z are in the message
     if 'x' in res_dict and 'y' in res_dict and 'z' in res_dict:
@@ -345,7 +353,7 @@ def parse_ulog(ulog_file, topic='mpc_full_state', outlier_cond=lambda d : d['z']
         for i in tqdm(range(len(res_dict['wx'])), leave=False):
             res_dict['wx'][i], res_dict['wy'][i], res_dict['wz'][i] = \
                 frd_to_flu_conversion([res_dict['wx'][i], res_dict['wy'][i], res_dict['wz'][i]])
-                
+
     # Do some cleaning
     # Remove values that are too closed to the ground
     if outlier_cond is not None:

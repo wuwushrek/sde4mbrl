@@ -1,17 +1,21 @@
-# python train_static_model.py --cfg iris_sitl/optimizer_prior.yaml --out prior_iris --fm_model linear
+# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python train_static_model.py --cfg iris_sitl/optimizer_prior.yaml --out prior_iris
 
 # An example of config file used to train the geometric parameters of the quadcopter
 # along with the thurst and moment response to motors inputs
+n_x : 13
+n_u : 4
+n_y : 13
+
 
 # Path the the log data
 logs_dir:
-  - ~/Documents/log_flights/iris_sitl_0.ulg
   - ~/Documents/log_flights/iris_sitl_1.ulg
   - ~/Documents/log_flights/iris_sitl_2.ulg
+  - ~/Documents/log_flights/iris_sitl_3.ulg
   # More trajectories if available
 
 # Testing trajectory
-test_trajectory: ~/Documents/log_flights/iris_sitl_test.ulg
+test_trajectory: ~/Documents/log_flights/iris_sitl_3.ulg
 
 non_neg_params: ['Ixx', 'Iyy', 'Izz', 'mass']
 
@@ -28,7 +32,10 @@ init_params:
   Ixx: 0.025
   Iyy: 0.025
   Izz: 0.05
-  fm_model: linear # linear, quadratic, cubic
+  fm_model:
+    order: 2
+    use_constant_term: True
+    assume_sym: True
 
 # Enforce that the trajectory log is filtered every time
 # When false, the trajectory is only filtered the first time and save on the disk
@@ -54,14 +61,14 @@ cutoff_freqs:
 # Loss function parameters
 # Parameters to weight objective in the loss function
 loss:
-  pen_xdot: 10.0                # Weight coefficient on the vector field
+  pen_xdot: 1.0                # Weight coefficient on the vector field
   pen_params: 1.0               # Weight on all the params of the problem
   default_weights: 0         # The default weight penalty terms
   special_parameters_pen: # Penalty coefficient for special parameters
-    mass: 10.
-    Ixx: 2.0
-    Iyy: 2.0
-    Izz: 2.0
+    mass: 100.
+    Ixx: 10.0
+    Iyy: 10.0
+    Izz: 10.0
 
 # Optimizer parameters
 optimizer:
@@ -69,15 +76,21 @@ optimizer:
     # params:
     #   b1: 0.999
     #   b2: 0.9999
-  - name: exponential_decay
+  - name: linear_schedule
     scheduler: True
     params:
       init_value: -0.01 # Initial learning rate (Negative value for minimization)
-      transition_steps: 80000 # Basically the maximum number of gradient steps
-      decay_rate: 0.0 # Typically (end_value / init_value) if end_value is expected at end
-  - name: adaptive_grad_clip
-    params:
-      clipping: 0.001
+      end_value: -0.001
+      transition_steps: 50000 # Basically the maximum number of gradient steps 
+  # - name: exponential_decay
+  #   scheduler: True
+  #   params:
+  #     init_value: -0.01 # Initial learning rate (Negative value for minimization)
+  #     transition_steps: 80000 # Basically the maximum number of gradient steps
+  #     decay_rate: 0.0 # Typically (end_value / init_value) if end_value is expected at end
+  # - name: adaptive_grad_clip
+  #   params:
+  #     clipping: 0.001
 
 # Training parameters
 training:
@@ -95,3 +108,4 @@ training:
   key_to_show: null           # The parameters to print during the loss
 
   display_losses: True        # Display the losses as the training evolves
+  TrainCoeff: 1.0
