@@ -213,7 +213,11 @@ def one_step_cost_f(x, u, extra_args, _cost_params):
             uerr = jax.nn.sigmoid(uerr - 7.0) * jnp.array(_cost_params['uerr_sig'])
         uerr = jnp.sum(uerr)
 
-    return perr + verr + qerr + werr + uerr
+    if 'res_sig' in _cost_params:
+        _res_low, _res_mult = _cost_params['res_sig']
+        return jnp.tanh((perr + verr + qerr + werr + uerr - _res_low)) * _res_mult
+    
+    return (perr + verr + qerr + werr + uerr) * jnp.array(_cost_params.get('res_mult',1.0))
 
 def augmented_cost(u_params, _multi_sampling_cost, _cost_params, _time_steps, n_u):
     """ This function augment the cost with slew rate penalty and etc ...
@@ -225,7 +229,7 @@ def augmented_cost(u_params, _multi_sampling_cost, _cost_params, _time_steps, n_
     if 'u_slew_coeff' in _cost_params:
         __time_steps = _time_steps[:-1].reshape(-1, 1)
         cost_u_slew_rate = (jnp.square(u_params[1:, :n_u] - u_params[:-1, :n_u]) / __time_steps) * jnp.array(_cost_params['u_slew_coeff']).reshape(1, -1)
-        cost_u_slew_rate = jnp.sum(cost_u_slew_rate)
+        cost_u_slew_rate = jnp.sum(cost_u_slew_rate) * _cost_params.get('res_mult', 1.0)
 
     # State slew rate
     state_slew_rate = jnp.array(0.)
@@ -236,7 +240,7 @@ def augmented_cost(u_params, _multi_sampling_cost, _cost_params, _time_steps, n_
         _time_steps = _time_steps.reshape(1, -1, 1)
         slew_state = (_state_evol[:, 1:, indx_active_params] - _state_evol[:, :-1, indx_active_params]) / _time_steps
         slew_coeffs = jnp.array(_cost_params['state_slew_coeffs'])
-        state_slew_rate = jnp.sum( jnp.square(slew_state) * slew_coeffs.reshape(1,1,-1) )
+        state_slew_rate = jnp.sum( jnp.square(slew_state) * slew_coeffs.reshape(1,1,-1) ) * _cost_params.get('res_mult', 1.0)
 
     return total_cost + cost_u_slew_rate + state_slew_rate
 
@@ -253,11 +257,11 @@ def reset_apg(x, apg_mpc_params, _constructor_uslack, rng=None, uref=None, _pol_
             x_init, u_init = x_init[0], u_init[0] # Take only the first sample
         else:
             u_init = _pol_fn(x)
-            x_init = None
+            x_init = x
     else:
         assert uref is not None, "If no policy is provided, the reference input must be provided"
         u_init = uref
-        x_init = None
+        x_init = x
     # u_init = uref
     # x_init = None
     # Get the full u + slack variable

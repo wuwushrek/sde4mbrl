@@ -70,9 +70,11 @@ def initialize_problem_constraints(n_x, n_u, params_model):
 
     # Check if bounds on the state are present
     has_xbound = 'state_constr' in params_model
+    weight_constr = 1
     # By default we impose bounds constraint on the states using nonsmooth penalization
     slack_proximal, state_idx, penalty_coeff, state_lb, state_ub = False, None, None, None, None
     if has_xbound:
+        weight_constr = params_model['state_constr'].get('constr_pen', 1)
         print('Found states bound constraints...\n')
         slack_dict = params_model['state_constr']
         assert len(slack_dict['state_id']) <= n_x and \
@@ -83,9 +85,13 @@ def initialize_problem_constraints(n_x, n_u, params_model):
         penalty_coeff = slack_dict['state_penalty']
         state_lb = jnp.array([x[0] for x in slack_dict['state_bound']])
         state_ub = jnp.array([x[1] for x in slack_dict['state_bound']])
+        slack_scaling = jnp.array(params_model['state_constr'].get('slack_scaling', 1)) if slack_proximal else 1
+        # Scale down state_lb and state_ub by slack_scaling
+        state_lb = state_lb / slack_scaling
+        state_ub = state_ub / slack_scaling
 
     return (has_ubound, input_lb, input_ub), \
-            (has_xbound, slack_proximal, state_idx, penalty_coeff, state_lb, state_ub )
+            (has_xbound, slack_proximal, state_idx, penalty_coeff, state_lb, state_ub, weight_constr, slack_scaling)
 
 
 class ControlledSDE(hk.Module):
@@ -626,7 +632,6 @@ class ControlledSDE(hk.Module):
             extra_cost_args (None, optional): Extra arguments to be passed to the cost function
 
         """
-
         # Define the augmented dynamics
         def cost_aug_drift(_aug_x, _u, extra_args=None):
             _x = _aug_x[:-1]
@@ -1155,7 +1160,7 @@ def create_online_cost_sampling_fn(params_model,
     # params_model['time_steps'] = time_steps
 
     (has_ubound, input_lb, input_ub),\
-        (has_xbound, slack_proximal, state_idx, penalty_coeff, state_lb, state_ub ) = \
+        (has_xbound, slack_proximal, state_idx, penalty_coeff, state_lb, state_ub, weight_constr, slack_scaling) = \
             initialize_problem_constraints(params_model['n_x'], params_model['n_u'], params_mpc)
 
     # Transform the penalty coefficient into an array
@@ -1171,13 +1176,14 @@ def create_online_cost_sampling_fn(params_model,
         diff_x = jnp.concatenate((x - state_ub, state_lb - x))
         _penalty_coeff = jnp.concatenate((penalty_coeff, penalty_coeff))
         #[TODO Franck] Maybe mean/sum the error instead of doing a mean over states
-        return jnp.sum(jnp.where( diff_x > 0, 1., 0.) * jnp.square(diff_x) * _penalty_coeff)
+        return jnp.sum(jnp.where( diff_x > 0, 1., 0.) * jnp.square(diff_x) * _penalty_coeff) * weight_constr
 
     # The cost of penalizing the constraints using a smooth function and proximal method
     def constr_cost_withprox(x_true, slack_x):
         """ With proximal constraint on the slack variable -> smooth norm 2 regularization
         """
-        return jnp.sum(jnp.square(x_true[state_idx]-slack_x) * penalty_coeff)
+        diff_state = x_true[state_idx] - slack_x * slack_scaling
+        return jnp.sum(jnp.square(diff_state) * penalty_coeff) * weight_constr
 
     # A function to constraint a vector between a given minimum and maximum values
     constr_vect = lambda a, a_lb, a_ub:  jnp.minimum(jnp.maximum(a, a_lb), a_ub)
@@ -1281,9 +1287,14 @@ def create_online_cost_sampling_fn(params_model,
         zero_u = jnp.ones((num_var, n_u)) * 1e-4
         # Non-zero initialization for gradient descent to work properly for the slack variables
         zero_x = jnp.ones((num_var, len(state_idx))) * 1e-4 if has_slack else None
+        slack_scaling_vect = jnp.ones((num_var, len(state_idx))) * (slack_scaling if slack_scaling.ndim < 1 else slack_scaling[None] ) if has_slack else None
 
         if u is not None and u.ndim == 1:
-            u = jnp.array([ u for _ in range(num_var)])
+            u = jnp.array([ u for _ in range(num_var)]) + 1e-4 # THis is just so that the parameters are not zero
+        if x is not None and x.ndim == 1:
+            x = jnp.array([ x for _ in range(num_var+1)])
+        if x is not None: # We replace the first component of the state with the last component
+            x = x.at[0,:].set(x[-1,:])
 
         if u is None and not has_slack:
             return zero_u # jnp.zeros((num_var, n_u))
@@ -1293,19 +1304,19 @@ def create_online_cost_sampling_fn(params_model,
 
         if u is None and x is not None: # slack is true
             assert x.ndim == 2 and x.shape[0] == num_var+1
-            return jnp.concatenate((zero_u, x[:-1,state_idx]), axis=1)
+            return jnp.concatenate((zero_u, x[:-1,state_idx]/slack_scaling_vect), axis=1) + 1e-4
 
         if u is not None and not has_slack:
             assert u.ndim == 2 and u.shape[0] == num_var
-            return u
+            return u + 1e-4
 
         if u is not None and x is None: # has slack is true
             assert u.ndim == 2 and u.shape[0] == num_var
-            return jnp.concatenate((u, zero_x), axis=1)
+            return jnp.concatenate((u, zero_x), axis=1) + 1e-4
 
         if u is not None and x is not None: # has slack is true
             assert u.ndim == 2 and x.ndim == 2 and u.shape[0]+1 == x.shape[0]
-            return jnp.concatenate((u, x[:-1,state_idx]), axis=1)
+            return jnp.concatenate((u, x[:-1,state_idx]/slack_scaling_vect), axis=1) + 1e-4
 
         assert False, 'This case is not handle...'
 
