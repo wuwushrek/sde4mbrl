@@ -71,6 +71,7 @@ def initialize_problem_constraints(n_x, n_u, params_model):
     # Check if bounds on the state are present
     has_xbound = 'state_constr' in params_model
     weight_constr = 1
+    slack_scaling = 1
     # By default we impose bounds constraint on the states using nonsmooth penalization
     slack_proximal, state_idx, penalty_coeff, state_lb, state_ub = False, None, None, None, None
     if has_xbound:
@@ -975,7 +976,7 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
 
     # Define a projection function for the parameters
     def nonneg_projection(_params):
-        return jax.tree_map(lambda x, nonp : jnp.maximum(x, 0.) if nonp else x, _params, nonneg_params)
+        return jax.tree_map(lambda x, nonp : jnp.maximum(x, 1.0e-5) if nonp else x, _params, nonneg_params)
 
     # Now define the n_sampling method
     def multi_sampling(_nn_params, y, u, rng, extra_args=None):

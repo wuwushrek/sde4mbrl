@@ -1,0 +1,22 @@
+# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python sde_rotor_model.py --fun gen_traj --cfg hexa_sitl/data_generation.yaml
+# Directory where to save the data and the model
+vehicle_dir: ~/Documents/sde4mbrl/sde4mbrlExamples/rotor_uav/hexa_ahg
+outfile: trajs
+
+# Path the the log data
+train_trajectory:
+  - ~/Documents/log_flights/hexa_ahg_manual1.ulg
+  - ~/Documents/log_flights/hexa_ahg_manual2.ulg
+  - ~/Documents/log_flights/hexa_ahg_manual3.ulg
+  # - ~/Documents/log_flights/hexa_ahg_autonomous.ulg
+  # More trajectories if available
+
+# Testing trajectory
+test_trajectory:
+  - ~/Documents/log_flights/hexa_ahg_manual2.ulg
+
+# Criteria for parsing the trajectories based on minmax conditions
+criteria:
+  TRAJ_MIN_LEN: 500 # The minimum length for a trajectory after splitting under the state criteria below
+  states: # The states for which to impose constraints when parsing the dta
+    z: [0.15, 6.0] # min max value to include while training
