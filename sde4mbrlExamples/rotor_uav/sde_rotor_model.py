@@ -293,7 +293,10 @@ class SDERotorModel(ControlledSDE):
             in_vect = in_vect / in_vect_scale
             active_indx = self.params['residual_forces'].get('active_indx', None)
             in_vect = in_vect[jnp.array(active_indx)] if active_indx is not None else in_vect
-            Fres += self.residual_forces(in_vect)
+            stab_coeff = 1.0
+            if self.params.get('stability', False):
+                stab_coeff = jnp.sum(jnp.square(in_vect))
+            Fres += self.residual_forces(in_vect) * stab_coeff
 
         if self.params.get('aero_drag_effect', False):
             Fres += self.aero_drag(v_b)
@@ -318,7 +321,10 @@ class SDERotorModel(ControlledSDE):
         in_vect = in_vect / in_vect_scale
         active_indx = self.params['residual_moments'].get('active_indx', None)
         in_vect = in_vect[jnp.array(active_indx)] if active_indx is not None else in_vect
-        Mres = self.residual_moments(in_vect)
+        stab_coeff = 1.0
+        if self.params.get('stability', False):
+            stab_coeff = jnp.sum(jnp.square(in_vect))
+        Mres = self.residual_moments(in_vect) * stab_coeff
         return Mres
 
     def get_effective_thrust(self, thrust_, ge_effect):

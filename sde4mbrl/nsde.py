@@ -505,7 +505,7 @@ class ControlledSDE(hk.Module):
         sconvex_loss = jnp.sum(jnp.square(jnp.minimum(sconvex_cond, 0)))
         # sconvex_loss = jnp.sum(jnp.square(sconvex_cond)) # [TODO Franck] Check if this is better than summing
 
-        return jnp.sum(jnp.square(grad_den_xu)), sconvex_loss
+        return jnp.sum(jnp.square(grad_den_xu)), sconvex_loss, den_xu
 
 
     def sample_for_loss_computation(self, ymeas, uVal, rng, extra_scan_args=None):
@@ -611,7 +611,8 @@ class ControlledSDE(hk.Module):
             rng_density = rng_density[_indx]
 
         # Get the gradient and the convex loss
-        grad_norm, sconvex = jax.vmap(lambda _y, _u, _rng: self.density_loss(_y, _u, _rng, mu_coeff))(den_yinput, den_uinput, rng_density)
+        grad_norm, sconvex, _density_val = jax.vmap(lambda _y, _u, _rng: self.density_loss(_y, _u, _rng, mu_coeff))(den_yinput, den_uinput, rng_density)
+        extra['density_val'] = jnp.mean(_density_val)
         
         # Error on prediction, Gradient error, strong convexity error, mu_coeff, and extra values
         return _error_data, jnp.mean(grad_norm), jnp.sum(sconvex), mu_coeff, extra
@@ -976,7 +977,7 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
 
     # Define a projection function for the parameters
     def nonneg_projection(_params):
-        return jax.tree_map(lambda x, nonp : jnp.maximum(x, 1.0e-5) if nonp else x, _params, nonneg_params)
+        return jax.tree_map(lambda x, nonp : jnp.maximum(x, 0.0) if nonp else x, _params, nonneg_params)
 
     # Now define the n_sampling method
     def multi_sampling(_nn_params, y, u, rng, extra_args=None):

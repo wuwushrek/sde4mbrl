@@ -1,4 +1,4 @@
-# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python sde_rotor_model.py --fun train_sde --cfg iris_sitl/optimizer_sde.yaml --out iris_sitl_linear_nonoise
+# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python sde_rotor_model.py --fun train_sde --cfg iris_sitl/optimizer_sde.yaml --out iris_sitl
 # XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python sde_rotor_model.py --fun gen_traj --cfg iris_sitl/data_generation.yaml
 
 # The directory containing my_models and my_data
@@ -19,8 +19,8 @@ model:
 
   # A priori knowledge of the noise distribution over the given prior dynamics knowledge
   # noise_prior_params: [0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0.0001, 0.0001, 0.0001, 0.0001, 0.01, 0.01, 0.01]
-  # noise_prior_params: [0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0.0001, 0.0001, 0.0001, 0.0001, 0.01, 0.01, 0.01]
-  noise_prior_params: [0., 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  noise_prior_params: [0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0, 0, 0, 0, 0.05, 0.05, 0.05]
+  # noise_prior_params: [0., 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
   # This is not used when learned_nominal is not null
   # This means that, when learned_nominal is null, these values are used to initialize the corresponding parameters in the model.
@@ -44,31 +44,32 @@ model:
 
   # Is the noise term dependent on the control? Does the density needs to be estimated by merging state and control?
   control_dependent_noise: False # If not specified, False is the default value
+  # stability: True
 
   # Scaling factor for normalizing neural network inputs
   # x: 0, y: 1, z: 2, vx: 3, vy: 4, vz: 5, qw: 6, qx: 7, qy: 8, qz: 9, wx: 10, wy: 11, wz: 12
-  # state_scaling: [8, 11, 4, 5, 5, 2, 1, 1, 1, 1, 1.9, 1.7, 2.6]
+  state_scaling: [8, 11, 4, 5, 5, 2, 1, 1, 1, 1, 1.9, 1.7, 2.6]
 
-  # diffusion_density_nn:
-  #   # All inputs are contributing to the noise
-  #   # Inputs that contribute to the noise estimation
-  #   indx_noise_in: [3, 4, 5, 10, 11, 12] # If not specified, it is all the inputs
+  diffusion_density_nn:
+    # All inputs are contributing to the noise
+    # Inputs that contribute to the noise estimation
+    indx_noise_in: [3, 4, 5, 10, 11, 12] # If not specified, it is all the inputs
 
-  #   # The learned noise only operates on this set of outputs
-  #   indx_noise_out: [3, 4, 5, 10, 11, 12] # If not specified, it is all the putputs
+    # The learned noise only operates on this set of outputs
+    indx_noise_out: [3, 4, 5, 10, 11, 12] # If not specified, it is all the putputs
 
-  #   # Density scaler function -> learn heteregeous noise or homogeneous noise with none type
-  #   scaler_nn:
-  #     type: scaler
-  #     init_value: 0.01
-  #     # activation_fn: tanh
-  #     # hidden_layers: [4, 4]
+    # Density scaler function -> learn heteregeous noise or homogeneous noise with none type
+    scaler_nn:
+      type: scaler
+      init_value: 0.01
+      # activation_fn: tanh
+      # hidden_layers: [4, 4]
     
-  #   density_nn:
-  #     init_value: 0.01
-  #     activation_fn: swish
-  #     hidden_layers: [8, 8]
-  #     aggressiveness: 0.75
+    density_nn:
+      init_value: 0.001
+      activation_fn: tanh
+      hidden_layers: [16, 16]
+      aggressiveness: 0.75
 
   # Ground effect learning enabled?
   ground_effect: False # True -> tb
@@ -85,12 +86,12 @@ model:
 
   residual_moments:
     #vb_x, vb_y, vb_z, wx, wy, wz 
-    # active_indx: [0, 1, 2] If not specified, then everything is used
+    # active_indx: [0, 1, 2] # If not specified, then everything is used
     hidden_layers: [8, 16]
     activation_fn: 'tanh'
 
   # Project some of the parameters on the nonnegative domain
-  noneg_params: ['aero_kdx', 'aero_kdy', aero_'kdz', 'aero_kh', 'mass', 'Ixx', 'Iyy', 'Izz']
+  noneg_params: ['aero_kdx', 'aero_kdy', 'aero_kdz', 'aero_kh', 'mass', 'Ixx', 'Iyy', 'Izz']
 
   # Define the parameters for the SDE solver
   sde_solver: 'euler_maruyama'
@@ -117,17 +118,18 @@ sde_loss:
 
   # Number of particles when fitting the SDE -> If different to the default model num_particles
   num_particles: 1
-  num_particles_test: 10
+  num_particles_test: 5
 
   # This is the horizon of integration when computing the loss
   # It might get clipped to the horizon of each trajectory in the dataset if it's greater than trajectory length
   # horizon: 500
-  horizon: 30
+  horizon: 20
 
   # Randomly subsample the horizon to fit only num_sample2consider if given
   num_sample2consider: 10
   # How the states are scaled in the loss computation
-  obs_weights: [16, 22, 8, 5, 5, 2, 5, 5, 5, 5, 1.9, 1.7, 2.6]
+  obs_weights: [14, 14, 6, 5, 5, 3, 1, 1, 1, 1, 2, 2, 3]
+  u_sampling_strategy: mean
 
   # Density loss parameters
   density_loss:
@@ -137,7 +139,7 @@ sde_loss:
     ball_nsamples: 10 # Number of points to sample in the ball
   
   # Penalty for the error on the prediction
-  pen_data: 10.0
+  pen_data: 1.0
 
   # Penalty on the gradient of the density loss
   pen_grad_density: 1.0 # 0.01
@@ -146,7 +148,7 @@ sde_loss:
   pen_density_scvex: 1.0
 
   # Regularization penalty default value for all parameters
-  pen_weights: 0 #1.0e-6
+  pen_weights: 1.0e-4 #1.0e-6
 
   #########################################################################
   # Extra constraints parameterization
@@ -154,15 +156,17 @@ sde_loss:
 
   default_weights: 1.0
   
-  # special_parameters_pen: # Deviation from initial guess in init_params
-  #   # aero_kdx: 1.0e-5
-  #   # aero_kdy: 1.0e-5
-  #   # aero_kdz: 1.0e-5
-  #   # aero_kh: 1.0e-5
-  #   mass: 2.0
-  #   Ixx: 2.0
-  #   Iyy: 2.0
-  #   Izz: 2.0
+  special_parameters_pen: # Deviation from initial guess in init_params
+    scaler: 0
+    density: 0
+    # aero_kdx: 1.0e-5
+    # aero_kdy: 1.0e-5
+    # aero_kdz: 1.0e-5
+    # aero_kh: 1.0e-5
+    # mass: 10000000
+    # Ixx: 2.0
+    # Iyy: 2.0
+    # Izz: 2.0
 
 # Convergence values for certain parameters
 # special_parameters_val:
@@ -186,7 +190,7 @@ sde_optimizer:
     params:
       init_value: -0.01 # Initial learning rate (Negative value for minimization)
       end_value: -0.001
-      transition_steps: 20000 # Basically the maximum number of gradient steps 
+      transition_steps: 30000 # Basically the maximum number of gradient steps 
   # - name: adaptive_grad_clip
   #   params:
   #     clipping: 0.01
@@ -194,9 +198,9 @@ sde_optimizer:
 
 # Training parameters
 sde_training:
-  train_batch: 512 # The mini batch size for the training dataset
+  train_batch: 128 # The mini batch size for the training dataset
   test_batch: 512 # The mini batch size for the training dataset
-  nepochs: 1000 # The number of epochs (full pass over the training dataset)
+  nepochs: 5000 # The number of epochs (full pass over the training dataset)
   patience: 2000 # The number of epochs after which to stop the learningif no improvement in solution
   test_freq: 50 # Number of gradient steps after which to evaluate and display losses
   save_freq: 500 # Number of gradient steps after which to save the current losses+nn
