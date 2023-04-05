@@ -533,6 +533,12 @@ class ControlledSDE(hk.Module):
 
         # uval is size (horizon * num_steps2data, num_ctrl), lets reshape it to (horizon, num_steps2data, num_ctrl)
         u_values = uVal.reshape((self.params['horizon'], num_steps2data, self.params['n_u']))
+
+        # extra_scan_args is a tuple of arguments when not None, we also need to reshape it
+        if extra_scan_args is not None:
+            # We will take only the first element for now because some type issues etc...
+            extra_scan_args = tuple([arg.reshape((self.params['horizon'], num_steps2data))[:,0] for arg in extra_scan_args])
+
         # Let's get the actual y_values
         y_values = ymeas[::num_steps2data]
         # How do we pick u_values? Different strategies stored in params['u_sampling_strategy']
@@ -1063,6 +1069,12 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
 
         # uval is size (horizon * num_steps2data, num_ctrl), lets reshape it to (horizon, num_steps2data, num_ctrl)
         u_values = u.reshape((u.shape[0], params_model['horizon'], num_steps2data, params_model['n_u']))
+
+        # extra_scan_args is a tuple of arguments when not None, we also need to reshape it
+        if extra_args is not None:
+            # We will take only the first element for now because some type issues etc...
+            extra_args = tuple([arg.reshape((arg.shape[0], params_model['horizon'], num_steps2data))[:,:,0] for arg in extra_args])
+
         # Let's get the actual y_values
         y_values = y[:,::num_steps2data,:]
         # How do we pick u_values? Different strategies stored in params['u_sampling_strategy']
