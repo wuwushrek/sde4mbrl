@@ -19,7 +19,7 @@ def init_opt_state(opt_var, optimizer_params):
         optimizer_params (TYPE): Description
     """
     # Extract the initial stepsize
-    init_step_size = jnp.array(optimizer_params['linesearch']['max_stepsize']\
+    init_step_size = jnp.array(optimizer_params['linesearch']['init_stepsize']\
                         if 'linesearch' in optimizer_params \
                         else optimizer_params['stepsize'])
 
@@ -69,7 +69,7 @@ def init_apg(x0, cost_fn, optimizer_params, proximal_fn=None,
 
     """
     # Extract the initial stepsize
-    init_step_size = jnp.array(optimizer_params['linesearch']['max_stepsize']\
+    init_step_size = jnp.array(optimizer_params['linesearch']['init_stepsize']\
                         if 'linesearch' in optimizer_params \
                         else optimizer_params['stepsize'])
 

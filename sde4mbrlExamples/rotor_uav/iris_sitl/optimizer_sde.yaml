@@ -48,7 +48,7 @@ model:
 
   # Scaling factor for normalizing neural network inputs
   # x: 0, y: 1, z: 2, vx: 3, vy: 4, vz: 5, qw: 6, qx: 7, qy: 8, qz: 9, wx: 10, wy: 11, wz: 12
-  state_scaling: [8, 11, 4, 5, 5, 2, 1, 1, 1, 1, 1.9, 1.7, 2.6]
+  state_scaling: [8, 11, 4, 5, 5, 1.7, 1, 0.24, 0.2, 1, 1.9, 1.7, 2.6]
 
   diffusion_density_nn:
     # All inputs are contributing to the noise
@@ -126,10 +126,10 @@ sde_loss:
   horizon: 20
 
   # Randomly subsample the horizon to fit only num_sample2consider if given
-  num_sample2consider: 10
+  num_sample2consider: 5
   # How the states are scaled in the loss computation
-  obs_weights: [14, 14, 6, 5, 5, 3, 1, 1, 1, 1, 2, 2, 3]
-  u_sampling_strategy: mean
+  obs_weights: [8, 11, 4, 5, 5, 1.7, 1, 0.24, 0.2, 1, 6, 6, 5]
+  u_sampling_strategy: random
 
   # Density loss parameters
   density_loss:

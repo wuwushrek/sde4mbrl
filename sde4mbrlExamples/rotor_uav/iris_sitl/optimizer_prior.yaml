@@ -33,7 +33,7 @@ init_params:
   Iyy: 0.025
   Izz: 0.05
   fm_model:
-    order: 2
+    order: 1
     use_constant_term: True
     assume_sym: True
 

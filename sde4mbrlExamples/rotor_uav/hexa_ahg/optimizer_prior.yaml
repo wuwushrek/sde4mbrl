@@ -11,11 +11,13 @@ logs_dir:
   - ~/Documents/log_flights/hexa_ahg_manual1.ulg
   - ~/Documents/log_flights/hexa_ahg_manual2.ulg
   - ~/Documents/log_flights/hexa_ahg_manual3.ulg
-  # - ~/Documents/log_flights/hexa_ahg_autonomous.ulg
+  - ~/Documents/log_flights/hexa_ahg_autonomous.ulg
+  - ~/Documents/log_flights/log_61_2023-4-4-19-57-00.ulg
   # More trajectories if available
 
 # Testing trajectory
-test_trajectory: ~/Documents/log_flights/hexa_ahg_manual2.ulg
+test_trajectory: ~/Documents/log_flights/hexa_ahg_manual1.ulg
+zmin: 0.3
 
 non_neg_params: ['Ixx', 'Iyy', 'Izz', 'mass']
 
@@ -34,7 +36,7 @@ init_params:
   Iyy: 0.008
   Izz: 0.011
   fm_model:
-    order: 2
+    order: 1
     use_constant_term: True
     assume_sym: True
 

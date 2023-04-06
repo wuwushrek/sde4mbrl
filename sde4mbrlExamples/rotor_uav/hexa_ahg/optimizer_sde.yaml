@@ -8,7 +8,7 @@ vehicle_dir: ~/Documents/sde4mbrl/sde4mbrlExamples/rotor_uav/hexa_ahg
 data_dir: trajs.pkl
 
 # # If few parameters were learnt using static matching of model of vector field and finite difference, we specify its name here
-learned_nominal: prior_hexa.yaml # a name of a learned .yaml file -> Generate this file using optimizer_prior or comment it if you don't want to learn a prior
+learned_nominal: prior_hexa_lin.yaml # a name of a learned .yaml file -> Generate this file using optimizer_prior or comment it if you don't want to learn a prior
 
 # Model parameters
 model:
@@ -19,8 +19,8 @@ model:
 
   # A priori knowledge of the noise distribution over the given prior dynamics knowledge
   # noise_prior_params: [0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0.0001, 0.0001, 0.0001, 0.0001, 0.01, 0.01, 0.01]
-  # noise_prior_params: [0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0.0001, 0.0001, 0.0001, 0.0001, 0.01, 0.01, 0.01]
-  noise_prior_params: [0., 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  noise_prior_params: [0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0.0, 0.0, 0.0, 0.0, 0.05, 0.05, 0.05]
+  # noise_prior_params: [0., 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
   # This is not used when learned_nominal is not null
   # This means that, when learned_nominal is null, these values are used to initialize the corresponding parameters in the model.
@@ -48,28 +48,28 @@ model:
 
   # Scaling factor for normalizing neural network inputs
   # x: 0, y: 1, z: 2, vx: 3, vy: 4, vz: 5, qw: 6, qx: 7, qy: 8, qz: 9, wx: 10, wy: 11, wz: 12
-  state_scaling: [3.2, 2.4, 2.9, 1.5, 1.9, 1.9, 1, 1, 1, 1, 4, 3, 1.7]
+  state_scaling: [3.5, 2.5, 2.9, 1.5, 1.9, 1.9, 1, 0.25, 0.25, 1, 4, 3.1, 2.2]
 
-  # diffusion_density_nn:
-  #   # All inputs are contributing to the noise
-  #   # Inputs that contribute to the noise estimation
-  #   indx_noise_in: [3, 4, 5, 10, 11, 12] # If not specified, it is all the inputs
+  diffusion_density_nn:
+    # All inputs are contributing to the noise
+    # Inputs that contribute to the noise estimation
+    indx_noise_in: [3, 4, 5, 10, 11, 12] # If not specified, it is all the inputs
 
-  #   # The learned noise only operates on this set of outputs
-  #   indx_noise_out: [3, 4, 5, 10, 11, 12] # If not specified, it is all the putputs
+    # The learned noise only operates on this set of outputs
+    indx_noise_out: [3, 4, 5, 10, 11, 12] # If not specified, it is all the putputs
 
-  #   # Density scaler function -> learn heteregeous noise or homogeneous noise with none type
-  #   scaler_nn:
-  #     type: scaler
-  #     init_value: 0.01
-  #     # activation_fn: tanh
-  #     # hidden_layers: [4, 4]
+    # Density scaler function -> learn heteregeous noise or homogeneous noise with none type
+    scaler_nn:
+      type: scaler
+      init_value: 0.01
+      # activation_fn: tanh
+      # hidden_layers: [4, 4]
     
-  #   density_nn:
-  #     init_value: 0.01
-  #     activation_fn: swish
-  #     hidden_layers: [8, 8]
-  #     aggressiveness: 0.75
+    density_nn:
+      init_value: 0.001
+      activation_fn: tanh
+      hidden_layers: [16, 16]
+      aggressiveness: 0.75
 
   # Ground effect learning enabled?
   ground_effect: False # True -> tb
@@ -115,11 +115,11 @@ sde_loss:
   # What stepsize to use when fitting the model to the data
   data_stepsize: 0.01
   stepsize: 0.05
-  u_sampling_strategy: mean
+  u_sampling_strategy: random
 
   # Number of particles when fitting the SDE -> If different to the default model num_particles
   num_particles: 1
-  num_particles_test: 1
+  num_particles_test: 5
 
   # This is the horizon of integration when computing the loss
   # It might get clipped to the horizon of each trajectory in the dataset if it's greater than trajectory length
@@ -127,10 +127,11 @@ sde_loss:
   horizon: 20
 
   # Randomly subsample the horizon to fit only num_sample2consider if given
-  num_sample2consider: 10
+  num_sample2consider: 5
   # How the states are scaled in the loss computation
-  # obs_weight: [4, 4, 4, 3, 3, 3, 8, 8, 8, 8, 3, 3, 3]
-  obs_weight: [3.2, 2.4, 2.9, 1.5, 1.9, 1.9, 1, 1, 1, 1, 4, 3, 1.7]
+  # obs_weight: [5, 5, 5, 1.5, 1.9, 1.9, 8, 8, 8, 8, 4, 3.1, 2.2]
+  obs_weights: [3.5, 2.5, 2.9, 1.5, 1.9, 1.9, 1, 0.25, 0.25, 1, 7, 7, 7]
+  # obs_weight: [3.2, 2.4, 2.9, 1.5, 1.9, 1.9, 1, 1, 1, 1, 4, 3, 1.7]
 
   # Density loss parameters
   density_loss:
@@ -149,7 +150,7 @@ sde_loss:
   pen_density_scvex: 1.0
 
   # Regularization penalty default value for all parameters
-  pen_weights: 1.0e-4 #1.0e-6
+  pen_weights: 1.0e-3
 
   #########################################################################
   # Extra constraints parameterization
@@ -178,6 +179,8 @@ sde_loss:
   #   Ixx: 2.0
   #   Iyy: 2.0
   #   Izz: 2.0
+  # nonneg_nonzero:
+  #   Ixx: 1.0e-4
 
 
 sde_optimizer:
@@ -199,14 +202,10 @@ sde_optimizer:
     params:
       init_value: -0.001 # Initial learning rate (Negative value for minimization)
       boundaries_and_scales:
-        2000: 10.0
-        10000: 0.5
-        20000: 0.2
+        4000: 10.0
+        18000: 0.5
+        30000: 0.2
   
-  # - name: adaptive_grad_clip
-  #   params:
-  #     clipping: 0.01
-
 
 # Training parameters
 sde_training:

@@ -61,9 +61,9 @@ def motor_model(get_params_fn, u, order=1, use_constant_term=False, assume_sym=T
         raise ValueError('Invalid number of motors')
     
     # Modify the mixer
-    mixer = mixer.at[:, 0].multiply(mixerMx)
-    mixer = mixer.at[:, 1].multiply(mixerMy)
-    mixer = mixer.at[:, 2].multiply(mixerMz)
+    mixer = mixer.at[0, :].multiply(mixerMx)
+    mixer = mixer.at[1, :].multiply(mixerMy)
+    mixer = mixer.at[2, :].multiply(mixerMz)
 
     # Compute the thrust and moment
     thurstAndMoment = mixer @ thurstPerMotor

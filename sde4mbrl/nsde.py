@@ -976,6 +976,9 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
     # Print the resulting penalty coefficients
     vprint('Penalty coefficients: \n {}'.format(penalty_coeffs))
 
+    # Get nonzero coefficient
+    nonzero_params = get_penalty_parameters(nn_params, loss_params.get('nonneg_nonzero', {}), 0.0)
+
     # Nonnegative parameters of the problem
     nonneg_params = get_non_negative_params(nn_params, {k : True for k in params_model.get('noneg_params', []) })
     # Print the resulting nonnegative parameters
@@ -983,7 +986,7 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
 
     # Define a projection function for the parameters
     def nonneg_projection(_params):
-        return jax.tree_map(lambda x, nonp : jnp.maximum(x, 0.0) if nonp else x, _params, nonneg_params)
+        return jax.tree_map(lambda x, nonp, nzer : jnp.maximum(x, nzer) if nonp else x, _params, nonneg_params, nonzero_params)
 
     # Now define the n_sampling method
     def multi_sampling(_nn_params, y, u, rng, extra_args=None):
