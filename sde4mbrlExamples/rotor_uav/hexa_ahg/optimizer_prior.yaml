@@ -8,15 +8,13 @@ n_y : 13
 
 
 logs_dir:
-  - ~/Documents/log_flights/hexa_ahg_manual1.ulg
-  - ~/Documents/log_flights/hexa_ahg_manual2.ulg
-  - ~/Documents/log_flights/hexa_ahg_manual3.ulg
-  - ~/Documents/log_flights/hexa_ahg_autonomous.ulg
-  - ~/Documents/log_flights/log_61_2023-4-4-19-57-00.ulg
+  - ~/Documents/log_flights/hexa_ahg_rem4.ulg
+  - ~/Documents/log_flights/hexa_ahg_rem5.ulg
+  - ~/Documents/log_flights/hexa_ahg_rem6.ulg
   # More trajectories if available
 
 # Testing trajectory
-test_trajectory: ~/Documents/log_flights/hexa_ahg_manual1.ulg
+test_trajectory: ~/Documents/log_flights/hexa_ahg_rem5.ulg
 zmin: 0.3
 
 non_neg_params: ['Ixx', 'Iyy', 'Izz', 'mass']
@@ -29,7 +27,7 @@ vehicle_dir: ~/Documents/sde4mbrl/sde4mbrlExamples/rotor_uav/hexa_ahg
 
 # Prior model parameter path
 init_params:
-  mass: 2.295
+  mass: 2.3
   gravity: 9.81
   # Quick estimate of the intertia based on the frame geometry
   Ixx: 0.008
@@ -38,11 +36,20 @@ init_params:
   fm_model:
     order: 1
     use_constant_term: True
-    assume_sym: True
+    assume_sym: False
+    learn_mixer: False
 
 # Enforce that the trajectory log is filtered every time
 # When false, the trajectory is only filtered the first time and save on the disk
-force_filtering: False
+force_filtering: True
+
+mavg_dict:
+  m1: 40
+  m2: 40
+  m3: 40
+  m4: 40
+  m5: 40
+  m6: 40
 
 # Cutoff frequency for filtering
 # The details on how to find them can be seen in filter_data_analysis.ipynb
@@ -69,9 +76,9 @@ loss:
   default_weights: 0         # The default weight penalty terms
   special_parameters_pen: # Penalty coefficient for special parameters
     mass: 1.
-    Ixx: 1.0
-    Iyy: 1.0
-    Izz: 1.0
+  #   Ixx: 1.0
+  #   Iyy: 1.0
+  #   Izz: 1.0
 
 # Optimizer parameters
 optimizer:
@@ -83,8 +90,8 @@ optimizer:
     scheduler: True
     params:
       init_value: -0.01 # Initial learning rate (Negative value for minimization)
-      end_value: -0.001
-      transition_steps: 50000 # Basically the maximum number of gradient steps 
+      end_value: -0.0001
+      transition_steps: 100000 # Basically the maximum number of gradient steps 
   # - name: exponential_decay
   #   scheduler: True
   #   params:

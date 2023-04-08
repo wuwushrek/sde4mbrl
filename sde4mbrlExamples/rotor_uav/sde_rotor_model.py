@@ -412,7 +412,7 @@ class SDERotorModel(ControlledSDE):
 
 ############# SET OF FUNCTIONS TO TRAIN THE MODEL #############
 
-def load_trajectory(log_dir, outlier_cond=lambda d : d['z']>0.1, min_length=500):
+def load_trajectory(log_dir, outlier_cond=lambda d : d['z']>0.1, min_length=500, mavg_dict={}):
     """Load the trajectories from the file
         Args:
             log_dir (str): Directory where the log file is stored
@@ -425,7 +425,7 @@ def load_trajectory(log_dir, outlier_cond=lambda d : d['z']>0.1, min_length=500)
     from sde4mbrlExamples.rotor_uav.utils import parse_ulog
     log_dir = os.path.expanduser(log_dir)
     # Load the data from the ULog
-    log_data = parse_ulog(log_dir, outlier_cond=outlier_cond, min_length=min_length)
+    log_data = parse_ulog(log_dir, outlier_cond=outlier_cond, min_length=min_length, mavg_dict=mavg_dict)
 
     # Ordered state names
     name_states = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'qw', 'qx', 'qy', 'qz', 'wx', 'wy', 'wz']
@@ -458,11 +458,14 @@ def main_generate_trajectories(cfg_yaml_dir):
             else:
                 res = np.logical_and(res, _res)
         return res
+    
+    # Check if a dictionary with moving average parameters are given
+    mavg_dict = cfg_yaml.get('mavg_dict', {})
 
     train_traj_list = []
     print('Loading train trajectories')
     for _data_path in tqdm(cfg_yaml['train_trajectory'], leave=False):
-        (xlist, ulist) = load_trajectory(_data_path, outlier_cond = _cond_fun, min_length = cfg_yaml['criteria']['TRAJ_MIN_LEN'])
+        (xlist, ulist) = load_trajectory(_data_path, outlier_cond = _cond_fun, min_length = cfg_yaml['criteria']['TRAJ_MIN_LEN'], mavg_dict=mavg_dict)
         # Check the size of the x value
         for _xtraj, _utraj in zip(xlist, ulist):
             train_traj_list.append((np.array(_xtraj), np.array(_utraj)))
@@ -470,7 +473,7 @@ def main_generate_trajectories(cfg_yaml_dir):
     test_traj_list = []
     print('Loading test trajectories')
     for _data_path in tqdm(cfg_yaml['test_trajectory'], leave=False):
-        (xlist, ulist) = load_trajectory(_data_path, outlier_cond = _cond_fun, min_length = cfg_yaml['criteria']['TRAJ_MIN_LEN'])
+        (xlist, ulist) = load_trajectory(_data_path, outlier_cond = _cond_fun, min_length = cfg_yaml['criteria']['TRAJ_MIN_LEN'], mavg_dict=mavg_dict)
         # Check the size of the x value
         for _xtraj, _utraj in zip(xlist, ulist):
             test_traj_list.append((np.array(_xtraj), np.array(_utraj)))

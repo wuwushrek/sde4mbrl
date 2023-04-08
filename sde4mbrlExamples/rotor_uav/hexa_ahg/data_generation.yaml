@@ -5,20 +5,27 @@ outfile: trajs
 
 # Path the the log data
 train_trajectory:
-  - ~/Documents/log_flights/hexa_ahg_manual1.ulg
-  - ~/Documents/log_flights/hexa_ahg_manual2.ulg
-  - ~/Documents/log_flights/hexa_ahg_manual3.ulg
+  - ~/Documents/log_flights/hexa_ahg_rem4.ulg
+  - ~/Documents/log_flights/hexa_ahg_rem5.ulg
+  - ~/Documents/log_flights/hexa_ahg_rem6.ulg
   # - ~/Documents/log_flights/hexa_ahg_autonomous.ulg
   # - ~/Documents/log_flights/log_61_2023-4-4-19-57-00.ulg
   # More trajectories if available
 
 # Testing trajectory
 test_trajectory:
-  # - ~/Documents/log_flights/log_63_2023-4-4-20-07-44.ulg
-  - ~/Documents/log_flights/hexa_ahg_manual1.ulg
+  - ~/Documents/log_flights/hexa_ahg_rem5.ulg
 
 # Criteria for parsing the trajectories based on minmax conditions
 criteria:
   TRAJ_MIN_LEN: 500 # The minimum length for a trajectory after splitting under the state criteria below
   states: # The states for which to impose constraints when parsing the dta
-    z: [0.35, 6.0] # min max value to include while training
+    z: [0.3, 6.0] # min max value to include while training
+
+mavg_dict:
+  m1: 40
+  m2: 40
+  m3: 40
+  m4: 40
+  m5: 40
+  m6: 40

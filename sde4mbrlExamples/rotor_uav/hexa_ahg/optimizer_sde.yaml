@@ -36,9 +36,9 @@ model:
     Iyy: 0.008
     Izz: 0.011
     fm_model:
-      order: 2
+      order: 1
       use_constant_term: True
-      assume_sym: True
+      assume_sym: False
 
   # This enforce that the init_params given by learned_nominal are fixed and not relearned
   fixed_init_params: False # Set this value to False if you want to relearn it. This value is ignored or set to Fals if learned_nominal is not given
@@ -48,7 +48,7 @@ model:
 
   # Scaling factor for normalizing neural network inputs
   # x: 0, y: 1, z: 2, vx: 3, vy: 4, vz: 5, qw: 6, qx: 7, qy: 8, qz: 9, wx: 10, wy: 11, wz: 12
-  state_scaling: [3.5, 2.5, 2.9, 1.5, 1.9, 1.9, 1, 0.25, 0.25, 1, 4, 3.1, 2.2]
+  state_scaling: [2.6, 3.1, 2.7, 3.2, 3.5, 1.5, 1, 0.3, 0.3, 0.4, 4, 3.5, 1.4]
 
   diffusion_density_nn:
     # All inputs are contributing to the noise
@@ -115,7 +115,7 @@ sde_loss:
   # What stepsize to use when fitting the model to the data
   data_stepsize: 0.01
   stepsize: 0.05
-  u_sampling_strategy: random
+  u_sampling_strategy: first
 
   # Number of particles when fitting the SDE -> If different to the default model num_particles
   num_particles: 1
@@ -130,8 +130,8 @@ sde_loss:
   num_sample2consider: 5
   # How the states are scaled in the loss computation
   # obs_weight: [5, 5, 5, 1.5, 1.9, 1.9, 8, 8, 8, 8, 4, 3.1, 2.2]
-  obs_weights: [3.5, 2.5, 2.9, 1.5, 1.9, 1.9, 1, 0.25, 0.25, 1, 7, 7, 7]
-  # obs_weight: [3.2, 2.4, 2.9, 1.5, 1.9, 1.9, 1, 1, 1, 1, 4, 3, 1.7]
+  # obs_weight: [1.6, 2.0, 1.9, 1.4, 1.9, 1.7, 1, 0.25, 0.25, 1, 1, 1, 1]
+  obs_weights: [2.6, 3.1, 2.7, 3.2, 3.5, 1.5, 1, 1, 1, 1, 4, 3.5, 1.4]
 
   # Density loss parameters
   density_loss:
@@ -191,32 +191,32 @@ sde_optimizer:
   # - name: add_decayed_weights
   #   params:
   #     weight_decay: 0.001
-  # - name: linear_schedule
-  #   scheduler: True
-  #   params:
-  #     init_value: -0.01 # Initial learning rate (Negative value for minimization)
-  #     end_value: -0.001
-  #     transition_steps: 30000 # Basically the maximum number of gradient steps 
-  - name: piecewise_constant_schedule
+  - name: linear_schedule
     scheduler: True
     params:
-      init_value: -0.001 # Initial learning rate (Negative value for minimization)
-      boundaries_and_scales:
-        4000: 10.0
-        18000: 0.5
-        30000: 0.2
+      init_value: -0.01 # Initial learning rate (Negative value for minimization)
+      end_value: -0.001
+      transition_steps: 10000 # Basically the maximum number of gradient steps 
+  # - name: piecewise_constant_schedule
+  #   scheduler: True
+  #   params:
+  #     init_value: -0.001 # Initial learning rate (Negative value for minimization)
+  #     boundaries_and_scales:
+  #       4000: 10.0
+  #       18000: 0.5
+  #       30000: 0.2
   
 
 # Training parameters
 sde_training:
-  train_batch: 128 # The mini batch size for the training dataset
+  train_batch: 512 # The mini batch size for the training dataset
   test_batch: 512 # The mini batch size for the training dataset
   nepochs: 5000 # The number of epochs (full pass over the training dataset)
   patience: 2000 # The number of epochs after which to stop the learningif no improvement in solution
   test_freq: 50 # Number of gradient steps after which to evaluate and display losses
   save_freq: 500 # Number of gradient steps after which to save the current losses+nn
   # Additional parameters to display when showing loss evolution
-  show_param: ['aero_kdx', 'aero_kdy', 'aero_kdz', 'aero_kh',  'mass', 'Ixx', 'Iyy', 'Izz']
+  show_param: ['aero_kdx', 'aero_kdy', 'aero_kdz', 'aero_kh',  'mass', 'Ixx', 'Iyy', 'Izz', 'Lmx', 'Lmy', 'CoeffDrag']
   TestStopingCrit:
     TestErrorData: 1.0 # 0.1
     # TestStdData: -0.1 # Maximime the noise of the learned SDE

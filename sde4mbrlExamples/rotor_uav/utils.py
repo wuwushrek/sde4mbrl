@@ -285,7 +285,7 @@ def find_consecutive_true(metrics, min_length=-1):
             full_auto_inds.append(inds_)
     return full_auto_inds
 
-def parse_ulog(ulog_file, topic='mpc_full_state', outlier_cond=lambda d : d['z']>0.1, min_length=500):
+def parse_ulog(ulog_file, topic='mpc_full_state', outlier_cond=lambda d : d['z']>0.1, min_length=500, mavg_dict={}):
     """Parse the ulog file and return the data in a dictionary.
 
     Args:
@@ -353,6 +353,20 @@ def parse_ulog(ulog_file, topic='mpc_full_state', outlier_cond=lambda d : d['z']
         for i in tqdm(range(len(res_dict['wx'])), leave=False):
             res_dict['wx'][i], res_dict['wy'][i], res_dict['wz'][i] = \
                 frd_to_flu_conversion([res_dict['wx'][i], res_dict['wy'][i], res_dict['wz'][i]])
+        # # Check if wx is in mavg_dict, if yes, apply the moving average according to the value in mavg_dict
+        # if 'wx' in mavg_dict:
+        #     res_dict['wx'] = np.convolve(res_dict['wx'], np.ones((mavg_dict['wx'],))/mavg_dict['wx'], mode='same')
+        # # Check if wy is in mavg_dict, if yes, apply the moving average according to the value in mavg_dict
+        # if 'wy' in mavg_dict:
+        #     res_dict['wy'] = np.convolve(res_dict['wy'], np.ones((mavg_dict['wy'],))/mavg_dict['wy'], mode='same')
+        # # Check if wz is in mavg_dict, if yes, apply the moving average according to the value in mavg_dict
+        # if 'wz' in mavg_dict:
+        #     res_dict['wz'] = np.convolve(res_dict['wz'], np.ones((mavg_dict['wz'],))/mavg_dict['wz'], mode='same')
+    
+    # Compute moving average for all the states in res_dict if present in mavg_dict
+    for key in mavg_dict.keys():
+        if key in res_dict:
+            res_dict[key] = np.convolve(res_dict[key], np.ones((mavg_dict[key],))/mavg_dict[key], mode='same')
 
     # Do some cleaning
     # Remove values that are too closed to the ground

@@ -161,7 +161,7 @@ def evaluate_loss_fn(loss_fn, m_params, data_eval, test_batch_size):
     return {_k : np.mean(v) for _k, v in result_dict.items()}
 
 
-def init_data(log_dir, cutoff_freqs, force_filtering=False, zmin=0.1):
+def init_data(log_dir, cutoff_freqs, force_filtering=False, zmin=0.1, mavg_dict={}):
     """Load the data from the ulog file and return the data as a dictionary.
 
     Args:
@@ -193,7 +193,7 @@ def init_data(log_dir, cutoff_freqs, force_filtering=False, zmin=0.1):
 
     # In static condition we want to avoid ground effect
     outlier_cond = lambda d: d['z'] > zmin
-    log_datas = parse_ulog(log_dir, outlier_cond=outlier_cond)
+    log_datas = parse_ulog(log_dir, outlier_cond=outlier_cond, mavg_dict=mavg_dict)
 
     if len(log_datas) == 0:
         return None
@@ -356,7 +356,7 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
     for log_dir in tqdm(logs_dir):
         # Pretty print the path to the ulog files
         tqdm.write('\t - {}'.format(log_dir))
-        _data = init_data(log_dir, cutoff_freqs, force_filtering=cfg_train['force_filtering'], zmin=cfg_train.get('zmin', 0.1))
+        _data = init_data(log_dir, cutoff_freqs, force_filtering=cfg_train['force_filtering'], zmin=cfg_train.get('zmin', 0.1), mavg_dict=cfg_train.get('mavg_dict', {}))
         if _data is None:
             # warn the user that the data could not be loaded
             tqdm.write('WARNING: The following trajectory was empty: {}'.format(log_dir))
@@ -364,6 +364,7 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
         # CHeck that the number of states and inputs is correct
         assert _data['x'].shape[1] == nx, 'The number of states is not correct'
         assert _data['u'].shape[1] == nu, 'The number of inputs is not correct'
+        # Perform a moving average filter on the data, specically on control inputs and angular velocity if the flag is set
         full_data.append(_data)
     
     # Merge the data from full_data
@@ -371,7 +372,7 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
     
     # Load the test trajectory data
     test_traj_dir = cfg_train['test_trajectory']
-    test_traj_data = init_data(test_traj_dir, cutoff_freqs, force_filtering=cfg_train['force_filtering'], zmin=cfg_train.get('zmin', 0.1))
+    test_traj_data = init_data(test_traj_dir, cutoff_freqs, force_filtering=cfg_train['force_filtering'], zmin=cfg_train.get('zmin', 0.1), mavg_dict=cfg_train.get('mavg_dict', {}))
     assert test_traj_data is not None, 'The test trajectory data could not be loaded'
     # CHeck that the number of states and inputs is correct
     assert test_traj_data['x'].shape[1] == nx, 'The number of states in test trajectory is not correct'
