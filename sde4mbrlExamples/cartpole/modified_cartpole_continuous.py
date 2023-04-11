@@ -117,7 +117,7 @@ class CartPoleEnv(gym.Env):
         if self.render_mode == "human":
             self.render()
 
-        return np.array((x, x_dot, np.sin(theta), np.cos(theta), theta_dot)), reward, terminated, False, {}
+        return self.get_obs(self.state), reward, terminated, False, {}
 
     def reset(self, seed: Optional[int] = None):
         super().reset(seed=seed)
@@ -130,7 +130,11 @@ class CartPoleEnv(gym.Env):
         self.steps_beyond_terminated = None
         if self.render_mode == "human":
             self.render()
-        return np.array((x, x_dot, np.sin(theta), np.cos(theta), theta_dot)), {}
+        return self.get_obs(self.state), {}
+
+    def get_obs(self, state):
+        x, x_dot, theta, theta_dot = state
+        return np.array((x, x_dot, np.sin(theta), np.cos(theta), theta_dot))
 
     def render(self):
         if self.render_mode is None:
