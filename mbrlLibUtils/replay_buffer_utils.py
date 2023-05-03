@@ -35,7 +35,7 @@ def populate_replay_buffers(dataset : tuple, buffer_size : int, save_actions : b
             current_obs = traj[0][t]
             current_action = traj[1][t]
             next_obs = traj[0][t + 1]
-            replay_buffer.add(current_obs, current_action, next_obs, 0, False)
+            replay_buffer.add(current_obs, current_action, next_obs, 0, False, False)
 
     return replay_buffer
 

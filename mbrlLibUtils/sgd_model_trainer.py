@@ -40,7 +40,7 @@ class TrainCallback(tqdm):
             "best_validation_score" : [],
         }
         self.model_checkpoints = {
-            "train_iteration" : [],
+            "epoch" : [],
             "model_state_dict" : [],
         }
 
@@ -51,18 +51,17 @@ class TrainCallback(tqdm):
         else:
             self.update()
 
-    def train_callback(self, model, total_calls_train, epoch, train_loss, val_score, best_val_score, total_training_iterations):
+    def train_callback(self, model, total_calls_train, epoch, train_loss, val_score, best_val_score):
 
         # Save the training results
-        self.training_results['train_iteration'].append(total_training_iterations)
         self.training_results['epoch'].append(epoch)
         self.training_results['training_loss'].append(train_loss)
         self.training_results['validation_score'].append(val_score)
         self.training_results['best_validation_score'].append(best_val_score)
 
         # Save the model checkpoint
-        if (self.model_checkpoint_frequency is not None) and (total_training_iterations % self.model_checkpoint_frequency == 0):
-            self.model_checkpoints["train_iteration"].append(total_training_iterations)
+        if (self.model_checkpoint_frequency is not None) and (epoch % self.model_checkpoint_frequency == 0):
+            self.model_checkpoints["epoch"].append(epoch)
             self.model_checkpoints["model_state_dict"].append(copy.deepcopy(model.state_dict()))
 
         # Update the tqdm progress bar
@@ -98,7 +97,7 @@ class SGDModelTrainer(ModelTrainer):
         logger: Optional[Logger] = None,
         minibatch_size: int = 128,
     ):
-        super().__init__(model, optim_lr, weight_decay, logger)
+        super().__init__(model, optim_lr=optim_lr, weight_decay=weight_decay, logger=logger)
         self.minibatch_size = minibatch_size
 
     def train(
