@@ -2,7 +2,6 @@
 
 from modified_cartpole_continuous import CartPoleEnv
 
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,7 +14,6 @@ from skrl.agents.torch.ppo import PPO, PPO_DEFAULT_CONFIG
 from skrl.resources.noises.torch import OrnsteinUhlenbeckNoise
 from skrl.trainers.torch import SequentialTrainer
 from skrl.envs.torch import wrap_env
-
 
 class Policy(GaussianMixin, Model):
     def __init__(self, observation_space, action_space, device,
@@ -49,7 +47,7 @@ class Value(DeterministicMixin, Model):
     def compute(self, inputs, role):
         return self.net(inputs["states"]), {}
 
-env = wrap_env(CartPoleEnv())
+env = CartPoleEnv()
 
 device = env.device
 
@@ -83,4 +81,3 @@ trainer = SequentialTrainer(cfg=cfg_trainer, env=env, agents=agent_ppo)
 
 # start training
 trainer.train()
-
