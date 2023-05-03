@@ -97,7 +97,7 @@ if __name__ == '__main__':
 
     data_dir = os.path.abspath(os.path.join(os.path.curdir, 'my_data'))
     
-    data_file_name = 'random.pkl'
+    data_file_name = 'learned.pkl'
     
     print("Training on {}".format(data_file_name))
     
