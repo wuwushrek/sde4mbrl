@@ -449,7 +449,7 @@ class ControlledSDE(hk.Module):
                         extra_scan_args=extra_scan_args
                     )
     
-    def density_loss(self, y, u, rng, mu_coeff):
+    def density_loss(self, y, u, rng, mu_coeff_fn):
         """ Given an observation, control, and a random number generator key,
             This function computes the following terms that define the loss on the density function:
                 1. The observation y is converted to a state x
@@ -497,6 +497,7 @@ class ControlledSDE(hk.Module):
 
         # Compute the density at each of the sampled points
         den_xball = jax.vmap(self.density_function)(xball)
+        mu_coeff = mu_coeff_fn(xu_red)
 
         # Compute the strong convexity loss given mu_coeff
         sconvex_cond = den_xball - den_xu - jnp.sum(grad_den_xu[None] * ball_dist, axis=1) - 0.5 * mu_coeff * jnp.sum(jnp.square(ball_dist), axis=1)
@@ -505,7 +506,92 @@ class ControlledSDE(hk.Module):
         sconvex_loss = jnp.sum(jnp.square(jnp.minimum(sconvex_cond, 0)))
         # sconvex_loss = jnp.sum(jnp.square(sconvex_cond)) # [TODO Franck] Check if this is better than summing
 
-        return jnp.sum(jnp.square(grad_den_xu)), sconvex_loss, den_xu
+        return jnp.sum(jnp.square(grad_den_xu)), sconvex_loss, den_xu, mu_coeff
+
+    # def density_loss_theory(self, y, u, rng, mu_coeff_fn):
+    #     """ Given an observation, control, and a random number generator key,
+    #         This function computes the following terms that define the loss on the density function:
+    #             1. The observation y is converted to a state x
+    #             2. x and u are combined [x,u] then reduced to the relevant components as defined by noise_aug_state_ctrl
+    #             3. The reduced state and control are passed to density_function to compute both the density and its gradient
+    #             4. Now, params['density_loss'] contains 4 keys: ball_radius, mu_coeff, learn_mucoeff, ball_nsamples
+    #                 a. ball_radius: The radius of the ball around the observation [y,u] where we sample points to enforce local density/ strong convexity
+    #                 b. mu_coeff: The coefficient of the strong convexity term
+    #                 c. learn_mucoeff: If True, then mu_coeff is a learnable parameter that will be optimized and initialize with the value in mu_coeff
+    #                 d. ball_nsamples: The number of points to sample from the ball to enforce the strong convexity term
+    #             5. We generate a ball of radius ball_radius around [y,u] and sample ball_nsamples points from it
+    #             6. We compute the density at each of the sampled points
+            
+    #         Args:
+    #             y (TYPE): The observation of the system
+    #             u (TYPE): The control signal applied to the system
+    #             rng (TYPE): A random number generator key
+
+    #         Returns:
+    #             TYPE: The gradient norm
+    #             TYPE: the strong convexity loss
+    #     """
+
+    #     # Split the random number generator into a key for observation to state conversion and a key for sampling the ball
+    #     rng_obs2state, rng_ball = jax.random.split(rng)
+
+    #     # Convert the observation to a state
+    #     x = self.obs2state(y, rng_obs2state)
+
+    #     # Combine the state and the control
+    #     xu_red = self.noise_aug_state_ctrl(x, u)
+
+    #     # Compute the density and its gradient
+    #     den_xu, grad_den_xu = jax.value_and_grad(self.density_function)(xu_red)
+
+    #     # Check if the ball_radius is an array or a scalar
+    #     # [TODO] Make the radius to be a proportion of the magnitude of the state
+    #     radius = jnp.array(self.params['density_loss']['ball_radius'])
+    #     if radius.ndim > 0:
+    #         assert radius.shape == xu_red.shape, "The ball_radius should be a scalar or an array of size xu_red.shape[0]"
+
+    #     # Sample ball_nsamples points from the ball of radius ball_radius around xu_red
+    #     ball_dist = jax.random.normal(rng_ball, (self.params['density_loss']['ball_nsamples'], xu_red.shape[0])) * radius[None]
+    #     xball = xu_red[None] + ball_dist
+
+    #     # Compute the density and its gradient at each of the sampled points
+    #     den_xball = jax.vmap(self.density_function)(xball)
+    #     mu_coeff = mu_coeff_fn(xu_red)
+
+    #     # Compute the strong convexity loss given mu_coeff
+    #     den_local_conv = den_xu + 0.5 * mu_coeff * jnp.sum(jnp.square(ball_dist), axis=1)
+    #     # sconvex_loss = jnp.sum(jnp.square(den_local_conv - den_xball))
+    #     sconvex_loss = jnp.sum( jnp.where(den_xball < den_local_conv, 1.0, 0.0) * jnp.square(den_local_conv - den_xball) )
+
+    #     # # Norm gradient cost
+    #     # actual_grad = mu_coeff * ball_dist[0]
+    #     # _, grad_xball = jax.value_and_grad(self.density_function)(xball[0])
+    #     # grad_norm_val = jnp.sum(jnp.square(grad_xball - actual_grad)) + jnp.sum(jnp.square(grad_den_xu))
+    #     grad_norm_val = jnp.sum(jnp.square(grad_den_xu))
+    #     return grad_norm_val, sconvex_loss, den_xu, mu_coeff
+
+    def mu_coeff_nn(self, aug_xu):
+        """ This function returns the learned local quadratic coefficient of the density function
+        Args:
+            aug_xu (TYPE): The augmented state and control vector
+        
+        Returns:
+            TYPE: A vector of the same size as the state vector (latent space)
+        """
+        type_mu = self.params['density_loss']['learn_mucoeff']['type']
+        if type_mu == 'constant':
+            return self.params['density_loss']['mu_coeff']
+        elif type_mu == 'global':
+            return self.params['density_loss']['mu_coeff'] * jnp.exp(hk.get_parameter('mu_coeff', shape=(), init=hk.initializers.RandomUniform(-0.001, 0.001)))
+
+        # In other cases, we use a neural network to learn the coefficient
+        _act_fn = self.params['density_loss']['learn_mucoeff']['activation_fn']
+        _init_value = self.params['density_loss']['learn_mucoeff'].get('init_value', 0.01)
+        mu_net = hk.nets.MLP([*self.params['density_loss']['learn_mucoeff']['hidden_layers'], 1],
+                                    activation = getattr(jnp, _act_fn) if hasattr(jnp, _act_fn) else getattr(jax.nn, _act_fn),
+                                    w_init=hk.initializers.RandomUniform(-_init_value, _init_value),
+                                    name = 'mu_coeff')
+        return jnp.exp(mu_net(aug_xu)[0]) * self.params['density_loss']['mu_coeff']
 
 
     def sample_for_loss_computation(self, ymeas, uVal, rng, extra_scan_args=None):
@@ -593,20 +679,19 @@ class ControlledSDE(hk.Module):
             return _error_data, 0.0, 0.0, 0.0, extra
 
         # Function to get the mu_coeff whether it is learnable or not
-        learn_mu = self.params['density_loss']['learn_mucoeff']
-        mu_coeff = self.params['density_loss']['mu_coeff']
-        get_mu_coeff = lambda:  mu_coeff if not learn_mu else jnp.exp(hk.get_parameter('mu_coeff', (), init= hk.initializers.Constant(jnp.log(mu_coeff)) ))
+        quad_approx = self.params['density_loss']['learn_mucoeff'].get('quad_approx', False)
+        my_density_loss = lambda _y, _u, _rng : self.density_loss(_y, _u, _rng, self.mu_coeff_nn) if not quad_approx else self.density_loss_theory(_y, _u, _rng, self.mu_coeff_nn)
         
         # Check if haiku is running initialization
         if hk.running_init():
             # Initialize the extra parameters if present
-            mu_coeff = get_mu_coeff()
+            # mu_coeff = get_mu_coeff(xnext[0], u_values[0])
+            grad_norm, sconvex, _density_val, _mu_coeff = my_density_loss(y0, u_values[0], rng_density)
+            extra['density_val'] = _density_val
             # Error on prediction, Gradient error, strong convexity error, mu_coeff, and extra values
-            return _error_data, 0.0, 0.0, mu_coeff, extra
+            return _error_data, grad_norm, sconvex, _mu_coeff, extra
 
         # Here haiku is not running initialization
-        # We get the mu_coeff if it is learnable
-        mu_coeff = get_mu_coeff()
         rng_density = jax.random.split(rng_density, ymeas.shape[0]-1)
         
         den_yinput = ymeas[:-1]
@@ -617,11 +702,11 @@ class ControlledSDE(hk.Module):
             rng_density = rng_density[_indx]
 
         # Get the gradient and the convex loss
-        grad_norm, sconvex, _density_val = jax.vmap(lambda _y, _u, _rng: self.density_loss(_y, _u, _rng, mu_coeff))(den_yinput, den_uinput, rng_density)
+        grad_norm, sconvex, _density_val, _mu_coeff = jax.vmap(my_density_loss)(den_yinput, den_uinput, rng_density)
         extra['density_val'] = jnp.mean(_density_val)
         
         # Error on prediction, Gradient error, strong convexity error, mu_coeff, and extra values
-        return _error_data, jnp.mean(grad_norm), jnp.sum(sconvex), mu_coeff, extra
+        return _error_data, jnp.mean(grad_norm), jnp.sum(sconvex), jnp.mean(_mu_coeff), extra
 
 
     def sample_dynamics_with_cost(self, y, u, rng, cost_fn, slack_index=None, extra_dyn_args=None, extra_cost_args=None):
@@ -938,8 +1023,15 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
 
     # Now we insert the density loss parameters if they are not present
     if 'density_loss' in loss_params:
+        _learn_mucoeff = loss_params['density_loss'].get('learn_mucoeff', False)
+        if type(_learn_mucoeff) is bool:
+            loss_params['density_loss']['learn_mucoeff'] = {'quad_approx' : False, 'type' : 'constant' if not _learn_mucoeff else 'global'}
+        if 'quad_approx' not in loss_params['density_loss']['learn_mucoeff']:
+            loss_params['density_loss']['learn_mucoeff']['quad_approx'] = True
+        if 'type' not in loss_params['density_loss']['learn_mucoeff']:
+            loss_params['density_loss']['learn_mucoeff']['type'] = 'constant'
         params_model['density_loss'] = loss_params['density_loss']
-        if not params_model['density_loss']['learn_mucoeff']:
+        if loss_params['density_loss']['learn_mucoeff']['type'] == 'constant':
             loss_params['pen_mu_coeff'] = 0.0
     else:
         loss_params['pen_mu_coeff'] = 0.0
@@ -1016,7 +1108,8 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
         loss_density_scvex = jnp.mean(jnp.mean(density_scvex, axis=1))
 
         # Compute the loss on the mu coefficient
-        loss_mu_coeff = jnp.mean(jnp.mean(mu_coeff, axis=1)) # This is probably not needed
+        mu_coeff_mean = jnp.mean(jnp.mean(mu_coeff, axis=1)) # This is probably not needed
+        loss_mu_coeff = 0.0
 
         # Weights penalization
         w_loss_arr = jnp.array( [jnp.sum(jnp.square(p - p_n)) * p_coeff \
@@ -1042,13 +1135,15 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
         
         if loss_params.get('pen_mu_coeff', 0) > 0:
             # We seek to maximize the mu coefficient
-            total_sum -= loss_params['pen_mu_coeff'] * loss_mu_coeff
+            # loss_mu_coeff = (mu_coeff_mean - params_model['density_loss']['mu_coeff'])**2 / mu_coeff_mean**2
+            loss_mu_coeff = 1.0 / mu_coeff_mean**2
+            total_sum += loss_params['pen_mu_coeff'] * loss_mu_coeff
 
         if loss_params.get('pen_weights', 0) > 0:
             total_sum += loss_params['pen_weights'] * w_loss
 
-        return total_sum, {'totalLoss' : total_sum, 'gradDensity' : loss_grad_density,
-                            'densitySCVEX' : loss_density_scvex, 'weights' : w_loss, 'muCoeff' : loss_mu_coeff
+        return total_sum, {'totalLoss' : total_sum, 'gradDensity' : loss_grad_density, 'lossMuCoeff' : loss_mu_coeff,
+                            'densitySCVEX' : loss_density_scvex, 'weights' : w_loss, 'muCoeff' : mu_coeff_mean
                             , 'dataLoss' : loss_data, **m_res}
     
 
