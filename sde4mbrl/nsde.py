@@ -398,6 +398,11 @@ class ControlledSDE(hk.Module):
             state of the system
         """
         return x
+
+    def state_transform_for_loss(self, x):
+        """ A function to transform the state for loss computation
+        """
+        return x
     
     def sample_sde(self, y0, uVal, rng, extra_scan_args=None):
         """Sample trajectory from the SDE distribution
@@ -668,7 +673,7 @@ class ControlledSDE(hk.Module):
         # Compute the error between the estimated and the measured observation
         # We sum the error over the integration horizon and then average over the number of coordinates
         # _error_data = jnp.mean(jnp.sum(jnp.square(meas_y-ynext), axis=0))
-        _error_data = jnp.sum(jnp.square((meas_y-ynext) / jnp.array(self.params.get('obs_weights', 1.0))))
+        _error_data = jnp.sum(jnp.square((self.state_transform_for_loss(meas_y)-self.state_transform_for_loss(ynext)) / jnp.array(self.params.get('obs_weights', 1.0))))
 
         # Extra values to print or to penalize the loss function on
         extra = {}
@@ -1027,7 +1032,7 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
         if type(_learn_mucoeff) is bool:
             loss_params['density_loss']['learn_mucoeff'] = {'quad_approx' : False, 'type' : 'constant' if not _learn_mucoeff else 'global'}
         if 'quad_approx' not in loss_params['density_loss']['learn_mucoeff']:
-            loss_params['density_loss']['learn_mucoeff']['quad_approx'] = True
+            loss_params['density_loss']['learn_mucoeff']['quad_approx'] = False
         if 'type' not in loss_params['density_loss']['learn_mucoeff']:
             loss_params['density_loss']['learn_mucoeff']['type'] = 'constant'
         params_model['density_loss'] = loss_params['density_loss']
@@ -1050,6 +1055,12 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
     # Transform the function into a pure one
     sampling_pure =  hk.without_apply_rng(hk.transform(sample_loss))
     nn_params = sampling_pure.init(rng_zero, yzero, uzero, rng_zero)
+
+    # Transform state_transform_for_loss into a pure function
+    _state_transform_for_loss = hk.without_apply_rng(hk.transform(lambda y : sde_constr(params_model, **extra_args_sde_constr).state_transform_for_loss(y)))
+    _p = _state_transform_for_loss.init(rng_zero, yzero)
+    m_state_transform_for_loss = lambda y: _state_transform_for_loss.apply(_p, y)
+
 
     # Let's get nominal parameters values
     nominal_params_val = loss_params.get('nominal_parameters_val', {})
@@ -1151,6 +1162,9 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
     _, multi_sampling_sde = create_sampling_fn(params_model, sde_constr, loss_params.get('seed', 0), 
                                                 loss_params['num_particles_test'], **extra_args_sde_constr)
     
+    # state_transform_for_loss
+
+    
     def test_fn(_nn_params, y, u, rng, extra_args=None):
         """ Given measurements y and control inputs u, as batched data, and a random number generator,
             Compute the error in predicting the trajectories and the variance of the prediction
@@ -1210,7 +1224,7 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
         yevol_mean = jnp.mean(yevol, axis=1)
 
         # Compute the error in the prediction wrt y
-        error_data = jnp.mean(jnp.sum(jnp.sum(jnp.square((y - yevol_mean) / jnp.array(loss_params.get('obs_weights', 1.0))), axis=-1), axis=-1))
+        error_data = jnp.mean(jnp.sum(jnp.sum(jnp.square((m_state_transform_for_loss(y) - m_state_transform_for_loss(yevol_mean)) / jnp.array(loss_params.get('obs_weights', 1.0))), axis=-1), axis=-1))
 
         # Compute the standard deviation of the prediction
         yevol_std = jnp.std(yevol, axis=1)
