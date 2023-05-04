@@ -11,7 +11,7 @@ from modified_cartpole_continuous import CartPoleEnv
 from time import sleep
 
 save_dir = os.path.abspath(os.path.join(os.path.curdir, 'my_data'))
-load_file_name = 'no_actions.pkl'
+load_file_name = 'learned.pkl'
 
 with open(os.path.join(save_dir, load_file_name), 'rb') as f:
     data = pickle.load(f)
@@ -38,7 +38,7 @@ print('Max_x_ind: {}, max_x_dot_ind: {}, max_theta_dot_ind: {}'.format(max_x_ind
 # ax = fig.add_subplot(313)
 # ax.plot(max_vals_theta_dot, label='theta_dot')
 
-traj_ind = 1
+traj_ind = 10
 
 traj = data[traj_ind][0]
 
@@ -48,18 +48,33 @@ c = traj[:, 3]
 theta = np.arctan2(s, c)
 
 fig = plt.figure()
-ax = fig.add_subplot(411)
+ax = fig.add_subplot(241)
 ax.plot(data[traj_ind][0][:, 0], label='x')
 ax.set_ylabel(r'$x$ (m)')
-ax = fig.add_subplot(412)
+
+ax = fig.add_subplot(242)
 ax.plot(data[traj_ind][0][:, 1], label='x_dot')
 ax.set_ylabel(r'$\dot{x}$ (m/s)')
-ax = fig.add_subplot(413)
+
+ax = fig.add_subplot(243)
+ax.plot(data[traj_ind][0][:, 2], label='sin(theta)')
+ax.set_ylabel(r'$\sin(\theta)$')
+
+ax = fig.add_subplot(244)
+ax.plot(data[traj_ind][0][:, 3], label='cos(theta)')
+ax.set_ylabel(r'$\cos(\theta)$')
+
+ax = fig.add_subplot(245)
 ax.plot(theta, label='theta')
 ax.set_ylabel(r'$\theta$ (rad)')
-ax = fig.add_subplot(414)
+
+ax = fig.add_subplot(246)
 ax.plot(data[traj_ind][0][:, 4], label='theta_dot')
 ax.set_ylabel(r'$\dot{\theta}$ (rad/s)')
+
+ax = fig.add_subplot(247)
+ax.plot(data[traj_ind][1], label='u')
+ax.set_ylabel(r'$u$')
 
 plt.show() 
 

@@ -97,20 +97,22 @@ def define_policy(policy_type : str, env : gym.Env, policy_save_path : Optional[
                     {'states' : obs_th}, 
                     role='policy'
                 )
-            # return outputs['mean_actions'].detach().numpy()
-            return act.detach().numpy()
+            return outputs['mean_actions'].detach().numpy()
+            # return act.detach().numpy()
          
     return policy
 
 def main():
-    env= CartPoleEnv(render_mode='rgb_array')
+    env= CartPoleEnv(render_mode='rgb_array')#, measurement_noise_diag=[0.0, 0.0, 0.0, 0.0])
 
-    policy_type = 'random'
+    policy_type = 'no_actions'
 
     # If loading a pre-trained policy, set the path to the policy here
     # run_name = '23-04-07_19-59-41-474383_PPO'
     # run_name = '23-05-03_18-13-01-141869_PPO'
-    run_name = '23-05-03_18-24-19-763565_PPO'
+    # run_name = '23-05-03_18-24-19-763565_PPO'
+    # run_name = '23-05-03_19-25-32-459262_PPO' # good one
+    run_name = '23-05-04_15-17-28-709494_PPO' # Good run with 25 force magnitude
     load_str = os.path.abspath(os.path.join('runs', run_name, 'checkpoints', 'best_agent.pt'))
     
     policy = define_policy(policy_type, env, load_str)
