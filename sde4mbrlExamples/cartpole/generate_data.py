@@ -76,7 +76,7 @@ def define_policy(policy_type : str, env : gym.Env, policy_save_path : Optional[
     """
     if policy_type == 'random':
         def policy(obs):
-            return env.action_space.sample()
+            return env.action_space.sample() 
     
     elif policy_type == 'no_actions':
         def policy(obs):
@@ -93,10 +93,11 @@ def define_policy(policy_type : str, env : gym.Env, policy_save_path : Optional[
         def policy(obs):
             obs_th = torch.tensor(obs, device=policy_net.device, dtype=torch.float32)
             with torch.no_grad():
-                act, _, _ = policy_net.act(
+                act, logprob, outputs = policy_net.act(
                     {'states' : obs_th}, 
                     role='policy'
                 )
+            # return outputs['mean_actions'].detach().numpy()
             return act.detach().numpy()
          
     return policy
@@ -104,10 +105,12 @@ def define_policy(policy_type : str, env : gym.Env, policy_save_path : Optional[
 def main():
     env= CartPoleEnv(render_mode='rgb_array')
 
-    policy_type = 'learned'
+    policy_type = 'random'
 
     # If loading a pre-trained policy, set the path to the policy here
-    run_name = '23-04-07_19-59-41-474383_PPO'
+    # run_name = '23-04-07_19-59-41-474383_PPO'
+    # run_name = '23-05-03_18-13-01-141869_PPO'
+    run_name = '23-05-03_18-24-19-763565_PPO'
     load_str = os.path.abspath(os.path.join('runs', run_name, 'checkpoints', 'best_agent.pt'))
     
     policy = define_policy(policy_type, env, load_str)
@@ -116,8 +119,8 @@ def main():
                         policy, 
                         num_trajs=100, 
                         max_steps=200, 
-                        init_state_low=np.array([0.0, 0.0, -np.pi + 0.1, -0.1]), 
-                        init_state_high=np.array([0.0, 0.0, np.pi - 0.1, 0.1])
+                        init_state_low=np.array([-1.0, -1.0, np.pi - 0.8, -0.8]), 
+                        init_state_high=np.array([1.0, 1.0, np.pi + 0.8, 0.8])
                     )
     
     dataset_name = policy_type + '.pkl'
@@ -128,9 +131,32 @@ def main():
     
     import matplotlib.pyplot as plt
     
+    traj_ind = 0
+
+    traj = dataset[traj_ind][0]
+
+    s = traj[:, 2]
+    c = traj[:, 3]
+
+    theta = np.arctan2(s, c)
+    
     fig = plt.figure()
-    ax = fig.add_subplot(111)
-    ax.plot(dataset[0][0][:, 3], label='cos(theta)')
+    ax = fig.add_subplot(511)
+    ax.plot(dataset[0][0][:, 0], label='x')
+    ax.set_ylabel(r'$x$ (m)')
+    ax = fig.add_subplot(512)
+    ax.plot(dataset[0][0][:, 1], label='x_dot')
+    ax.set_ylabel(r'$\dot{x}$ (m/s)')
+    ax = fig.add_subplot(513)
+    ax.plot(theta, label='theta')
+    ax.set_ylabel(r'$\theta$ (rad)')
+    ax = fig.add_subplot(514)
+    ax.plot(dataset[0][0][:, 4], label='theta_dot')
+    ax.set_ylabel(r'$\dot{\theta}$ (rad/s)')
+    ax = fig.add_subplot(515)
+    ax.plot(dataset[0][1][:, 0], label='action')
+    ax.set_ylabel(r'$u$ (N)')
+    
     plt.show()    
 
 if __name__ == "__main__":
