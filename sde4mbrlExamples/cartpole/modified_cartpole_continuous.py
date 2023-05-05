@@ -69,9 +69,7 @@ class CartPoleEnv(gym.Env):
 
         self.steps_beyond_terminated = None
 
-    def step(self, action):   
-        self.elapsed_steps += 1     
-        action = action.squeeze()
+    def step_dynamics(self, action):
         x, x_dot, theta, theta_dot = self.state
         force = action * self.force_mag
         costheta = math.cos(theta)
@@ -100,6 +98,14 @@ class CartPoleEnv(gym.Env):
 
         self.state = (x, x_dot, theta, theta_dot)
 
+
+    def step(self, action):   
+        self.elapsed_steps += 1     
+        action = action.squeeze()
+        
+        self.step_dynamics(action)
+
+        x, x_dot, theta, theta_dot = self.state
         terminated = bool(
             x < -self.x_threshold
             or x > self.x_threshold
