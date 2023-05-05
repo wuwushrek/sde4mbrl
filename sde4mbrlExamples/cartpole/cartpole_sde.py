@@ -79,7 +79,75 @@ class CartPoleSDE(ControlledSDE):
                                                 name = 'res_forces')
             return
 
+#### GYm wrapper environment for the cartpole SDE model ####
+def cartpole_sde_gym(filename='my_models/cartpole_bb_sde.pkl', num_particles=1, tau=0.02,
+                        jax_seed= 10, use_gpu=True, jax_gpu_mem_frac=0.2, **kwargs):
     
+    # Some imports
+    import time
+    from sde4mbrlExamples.cartpole.modified_cartpole_continuous import CartPoleEnv
+
+    if use_gpu:
+        os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = str(jax_gpu_mem_frac)
+        backend = 'gpu'
+    else:
+        backend = 'cpu'
+
+    # Find the file
+    model_path = os.path.expanduser(filename)
+    # Load the SDE model from the file
+    my_sde = load_predictor_function(model_path, prior_dist=False, nonoise=False,
+                                modified_params ={'horizon' : 1, 'num_particles' : num_particles, 'stepsize': tau}, 
+                                return_control=False, 
+                                return_time_steps=False)
+    
+    def _my_pred_fn(x, u, _rng):
+        """ Return the predicted next state
+        """
+        _xpred = my_sde(x, u, _rng)
+        return jnp.mean(_xpred[:,-1,:], axis=0), jnp.std(_xpred[:,-1,:], axis=0)
+    
+    # Initialize the random number generator
+    _rng = jax.random.PRNGKey(jax_seed)
+    # Initialize the state
+    _x0 = np.array([0.0, 0.0, np.pi, 0.0])
+    _u0 = np.array([0.0])
+    # We are going to compile ahead of time the function
+    _current_time = time.time()
+    sde_pred_fn = jax.jit(_my_pred_fn, backend=backend).lower(_x0, _u0, _rng).compile()
+    print('Compilation time of SDE: {}'.format(time.time() - _current_time))
+
+    # We print the evaluation time
+    _current_time = time.time()
+    _xpred, _xstd = sde_pred_fn(_x0, _u0, _rng)
+    _xpred.block_until_ready()
+    print(_xpred.shape, _xstd.shape)
+    print('Evaluation time of SDE: {}'.format(time.time() - _current_time))
+
+    # We create the gym environment
+    class CartPoleSDEEnv(CartPoleEnv):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self._rng = jax.random.PRNGKey(jax_seed)
+            self._sde_pred_fn = sde_pred_fn
+
+        def step_dynamics(self, action):
+            # We use the SDE model to predict the next state
+            action = np.array([action,])
+            assert self.state is not None, 'The state must be initialized'
+            assert action.shape == (1,), 'The action must be a scalar'
+            self._rng, next_rng = jax.random.split(self._rng)
+            _xpred, _xstd = self._sde_pred_fn(self.state, action, next_rng)
+            # We update the state
+            self.state = np.array(_xpred)
+            self._xstd = np.array(_xstd)
+        
+        def get_obs(self, state):
+            x, x_dot, theta, theta_dot = state
+            return np.array((x, x_dot, np.sin(theta), np.cos(theta), theta_dot))
+
+    return CartPoleSDEEnv(**kwargs)
+
 ############# SET OF FUNCTIONS TO TRAIN THE MODEL #####################
 def load_predictor_function(learned_params_dir, prior_dist=False, nonoise=False, modified_params ={}, 
                             return_control=False, return_time_steps=False):
