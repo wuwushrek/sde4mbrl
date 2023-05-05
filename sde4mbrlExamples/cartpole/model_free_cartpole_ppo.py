@@ -20,7 +20,14 @@ from skrl.envs.torch import wrap_env
 
 from mbrlLibUtils.rl_networks import Value, Policy
 
-env = wrap_env(CartPoleEnv())
+from sde4mbrlExamples.cartpole.cartpole_sde import cartpole_sde_gym
+
+env = cartpole_sde_gym(filename='~/Documents/sde4mbrl/sde4mbrlExamples/cartpole/my_models/cartpole_bb_rand_sde.pkl', num_particles=1, 
+                       jax_seed=10, use_gpu=True, jax_gpu_mem_frac=0.2,)
+
+# exit()
+# env = wrap_env(CartPoleEnv())
+env = wrap_env(env)
 
 device = env.device
 
