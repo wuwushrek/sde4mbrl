@@ -22,8 +22,8 @@ from mbrlLibUtils.rl_networks import Value, Policy
 
 from sde4mbrlExamples.cartpole.cartpole_sde import cartpole_sde_gym
 
-env = cartpole_sde_gym(filename='~/Documents/sde4mbrl/sde4mbrlExamples/cartpole/my_models/cartpole_bb_rand_sde.pkl', num_particles=1, 
-                       jax_seed=10, use_gpu=True, jax_gpu_mem_frac=0.2,)
+env = cartpole_sde_gym(filename='~/Documents/sde4mbrl/sde4mbrlExamples/cartpole/my_models/cartpole_bb_learned_v5_si_sde.pkl', num_particles=10, 
+                       jax_seed=10, use_gpu=True, jax_gpu_mem_frac=0.4,)
 
 # exit()
 # env = wrap_env(CartPoleEnv())
@@ -55,7 +55,7 @@ agent_ppo = PPO(models=models_ppo,
                   device=device)
 
 # Configure and instantiate the RL trainer
-cfg_trainer = {"timesteps": int(5e5), "headless": True}
+cfg_trainer = {"timesteps": int(7e5), "headless": True}
 trainer = SequentialTrainer(cfg=cfg_trainer, env=env, agents=agent_ppo)
 
 # start training
