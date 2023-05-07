@@ -20,22 +20,28 @@ from skrl.envs.torch import wrap_env
 
 from mbrlLibUtils.rl_networks import Value, Policy
 
+from mbrlLibUtils.rl_networks import Value, Policy
+
 from sde4mbrlExamples.cartpole.cartpole_sde import cartpole_sde_gym
 from sde4mbrlExamples.cartpole.cartpole_gym_mlp import CartPoleGaussianMLPEnv
+
+from datetime import datetime
+
+experiment_name = datetime.now().strftime("%y-%m-%d_%H-%M-%S-%f") + "_PPO_true_env"
 
 # env = cartpole_sde_gym(filename='~/Documents/sde4mbrl/sde4mbrlExamples/cartpole/my_models/cartpole_bb_rand_sde.pkl', num_particles=1, 
 #                        jax_seed=10, use_gpu=True, jax_gpu_mem_frac=0.2,)
     
-env = CartPoleGaussianMLPEnv(
-    load_file_name = os.path.abspath(
-        os.path.join(os.path.curdir, 'my_models', 'gaussian_mlp_ensemble_cartpole_learned')
-    ),
-    num_particles = 1,
-    torch_seed = 42,
-    use_gpu = True,
-)
+# env = CartPoleGaussianMLPEnv(
+#     load_file_name = os.path.abspath(
+#         os.path.join(os.path.curdir, 'my_models', 'gaussian_mlp_ensemble_cartpole_learned')
+#     ),
+#     num_particles = 1,
+#     torch_seed = 42,
+#     use_gpu = True,
+# )
 
-# env = wrap_env(CartPoleEnv())
+env = CartPoleEnv()
 env = wrap_env(env)
 
 device = env.device
@@ -52,6 +58,7 @@ for model in models_ppo.values():
 # Configure and instantiate the agent.
 cfg_ppo = PPO_DEFAULT_CONFIG.copy()
 cfg_ppo['rollouts'] = 2048 # number of steps per environment per update
+cfg_ppo['experiment']['experiment_name'] = experiment_name
 
 # Instantiate a RandomMemory (without replacement) as experience replay memory
 memory = RandomMemory(memory_size=cfg_ppo['rollouts'], num_envs=env.num_envs, device=device, replacement=False)
