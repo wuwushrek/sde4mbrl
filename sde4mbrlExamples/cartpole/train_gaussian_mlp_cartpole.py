@@ -1,24 +1,14 @@
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import numpy as np
-import omegaconf
 import torch
-import torch.optim as optim
 
-import mbrl.models as models
 import mbrl.util.common as common_utils
-from mbrl.util.replay_buffer import ReplayBuffer
 
 import pickle
 import os, sys
 
-import yaml
-
 sys.path.append('../../')
-from mbrlLibUtils.save_and_load_models import save_model_and_config, \
-    load_model_and_config
+from mbrlLibUtils.save_and_load_models import save_model_and_config, load_model_and_config
 from mbrlLibUtils.replay_buffer_utils import populate_replay_buffers, generate_sample_trajectories
-from mbrlLibUtils.sgd_model_trainer import SGDModelTrainer, TrainCallback
+from mbrlLibUtils.sgd_model_trainer import TrainCallback
 
 from mbrl.models import ModelTrainer
 
@@ -79,7 +69,7 @@ def run_training(cfg, data_file_name, test_data_file_name='learned.pkl', seed=42
 
     # Save the learned model
     if save_results:
-        experiment_name = 'gaussian_mlp_ensemble' + '_' +  'cartpole'
+        experiment_name = 'gaussian_mlp_ensemble' + '_' +  'cartpole' + '_' + data_file_name.split('.')[0]
         save_folder = os.path.abspath(os.path.join(os.path.curdir, 'my_models', experiment_name))
         if not os.path.exists(save_folder):
             os.makedirs(save_folder)
@@ -93,11 +83,10 @@ if __name__ == '__main__':
     from config.gaussian_mlp_ensemble_cartpole_config import ensemble_cfg as cfg
     seed = 42
 
-    test_data_file_name = 'learned.pkl'
-
     data_dir = os.path.abspath(os.path.join(os.path.curdir, 'my_data'))
     
-    data_file_name = 'learned.pkl'
+    data_file_name = 'no_actions.pkl'
+    test_data_file_name = 'no_actions.pkl'
     
     print("Training on {}".format(data_file_name))
     

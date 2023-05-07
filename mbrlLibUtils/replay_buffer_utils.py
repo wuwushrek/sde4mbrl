@@ -2,6 +2,10 @@ from mbrl.util.replay_buffer import ReplayBuffer
 import numpy as np
 import torch
 
+from mbrl.models import OneDTransitionRewardModel
+
+from typing import Optional, Tuple, Callable
+
 def populate_replay_buffers(dataset : tuple, buffer_size : int, save_actions : bool = False):
     """
     Populate replay buffer with the dataset of trajectories.
@@ -39,9 +43,20 @@ def populate_replay_buffers(dataset : tuple, buffer_size : int, save_actions : b
 
     return replay_buffer
 
-def generate_sample_trajectories(init_state, num_particles, dynamics_model, generator, time_horizon, ufun=None, device=None):
+def generate_sample_trajectories(
+        init_state:np.ndarray, 
+        num_particles:int, 
+        dynamics_model:OneDTransitionRewardModel, 
+        generator:torch.Generator, 
+        time_horizon:int, 
+        control_inputs:Optional[np.ndarray]=None,
+        ufun:Optional[Callable]=None, 
+        device:Optional[str]=None
+    ):
     """
-    Generate sample trajectories from the dynamics model
+    Generate sample trajectories from the dynamics model. For control inputs,
+    either pass in a batch of control inputs or a control function.
+    If neither is passed, then control inputs of 0 are used.
     
     Parameters
     ----------
@@ -56,6 +71,9 @@ def generate_sample_trajectories(init_state, num_particles, dynamics_model, gene
         Random number generator
     time_horizon : int
         Time horizon for the sample trajectories
+    control_inputs : np.array
+        Control inputs to use to generate the sample trajectories.
+        Shape should be [time_horizon, control_dim]
     ufun : function
         Control function.
     device : torch.device
@@ -77,20 +95,26 @@ def generate_sample_trajectories(init_state, num_particles, dynamics_model, gene
         initial_obs_batch.astype(np.float32), rng=generator
     )
 
-    act_zero = torch.zeros((num_particles,0), device=device)
-    if ufun is None:
-        ufun = lambda state : act_zero
-
-    # act = torch.zeros((num_particles,0), device=device)
-
     sample_trajectories = model_state['obs'].reshape(num_particles, 1, -1)
 
-    for t in range(time_horizon):
+    act_size = dynamics_model.model.in_size - init_state.shape[-1]
+
+    if control_inputs is not None:
+        for t in range(time_horizon - 1):
+            with torch.no_grad():
+                actions = torch.tensor(np.tile(
+                    control_inputs[t], (num_particles, act_size)
+                ), device=device)
+                next_obs, _, _, model_state = dynamics_model.sample(actions, model_state, rng=generator)
+            sample_trajectories = torch.concatenate((sample_trajectories, next_obs.reshape(num_particles, 1, -1)), axis=1)
+
+    if ufun is None:
+        act_zero = torch.zeros((num_particles, act_size), device=device)
+        ufun = lambda state : act_zero
+
+    for t in range(time_horizon - 1):
         with torch.no_grad():
             next_obs, _, _, model_state = dynamics_model.sample(ufun(model_state), model_state, rng=generator)
-        # if t == 0:
-        #     sample_trajectories = torch.concatenate((initial_obs_batch.reshape(num_particles, 1, -1), next_obs.reshape(num_particles, 1, -1)), axis=1) #next_obs.reshape(num_particles, 1, -1)
-        # else:
         sample_trajectories = torch.concatenate((sample_trajectories, next_obs.reshape(num_particles, 1, -1)), axis=1)
 
     return sample_trajectories
