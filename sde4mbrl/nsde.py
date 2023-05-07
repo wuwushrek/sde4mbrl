@@ -1131,6 +1131,9 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
         # Extra feature mean if there is any
         m_res = { k: jnp.mean(jnp.mean(v, axis=1)) for k, v in extra_feat.items()}
 
+        # Multiplier for the diffusion aware terms
+        pen_scvex_mult = loss_params.get('pen_scvex_mult', 1.0)
+
         # Compute the total sum
         total_sum = 0.0
         if loss_params.get('pen_data', 0) > 0:
@@ -1139,16 +1142,23 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
         if loss_params.get('pen_grad_density', 0) > 0:
             p_mucoeff = loss_params['density_loss']['mu_coeff']
             eff_pen = loss_params['pen_grad_density'] * p_mucoeff * loss_params['density_loss'].get('grad_scaler', 1.0/p_mucoeff)
-            total_sum += eff_pen * loss_grad_density 
+            total_sum += eff_pen * loss_grad_density  * pen_scvex_mult
         
         if loss_params.get('pen_density_scvex', 0) > 0:
-            total_sum += loss_params['pen_density_scvex'] * loss_density_scvex
+            total_sum += loss_params['pen_density_scvex'] * loss_density_scvex * pen_scvex_mult
         
         if loss_params.get('pen_mu_coeff', 0) > 0:
             # We seek to maximize the mu coefficient
-            # loss_mu_coeff = (mu_coeff_mean - params_model['density_loss']['mu_coeff'])**2 / mu_coeff_mean**2
-            loss_mu_coeff = 1.0 / mu_coeff_mean**2
-            total_sum += loss_params['pen_mu_coeff'] * loss_mu_coeff
+            pen_mu_type = loss_params.get('pen_mu_type', 'quad_inv')
+            if  pen_mu_type == 'quad_inv':
+                loss_mu_coeff = 1.0 / mu_coeff_mean**2
+            elif pen_mu_type == 'lin_inv':
+                loss_mu_coeff = 1.0 / mu_coeff_mean
+            elif pen_mu_type == 'exp_inv':
+                loss_mu_coeff = jnp.exp(-mu_coeff_mean * loss_params['pen_mu_temp'])
+            else:
+                raise ValueError('Unknown pen_mu_type: {}. Choose from quad_inv, lin_inv, exp_inv'.format(pen_mu_type))
+            total_sum += loss_mu_coeff * loss_params['pen_mu_coeff'] * pen_scvex_mult
 
         if loss_params.get('pen_weights', 0) > 0:
             total_sum += loss_params['pen_weights'] * w_loss
