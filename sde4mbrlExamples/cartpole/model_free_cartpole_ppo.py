@@ -29,6 +29,8 @@ from datetime import datetime
 
 experiment_name = datetime.now().strftime("%y-%m-%d_%H-%M-%S-%f") + "_PPO_true_env"
 
+env = cartpole_sde_gym(filename='~/Documents/sde4mbrl/sde4mbrlExamples/cartpole/my_models/cartpole_bb_learned_v5_si_sde.pkl', num_particles=10, 
+                       jax_seed=10, use_gpu=True, jax_gpu_mem_frac=0.4,)
 # env = cartpole_sde_gym(filename='~/Documents/sde4mbrl/sde4mbrlExamples/cartpole/my_models/cartpole_bb_rand_sde.pkl', num_particles=1, 
 #                        jax_seed=10, use_gpu=True, jax_gpu_mem_frac=0.2,)
     
@@ -71,7 +73,7 @@ agent_ppo = PPO(models=models_ppo,
                   device=device)
 
 # Configure and instantiate the RL trainer
-cfg_trainer = {"timesteps": int(5e5), "headless": True}
+cfg_trainer = {"timesteps": int(7e5), "headless": True}
 trainer = SequentialTrainer(cfg=cfg_trainer, env=env, agents=agent_ppo)
 
 # start training

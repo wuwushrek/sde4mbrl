@@ -16,6 +16,11 @@ import numpy as np
 from time import sleep
 import os
 
+# np.random.seed(1)
+# np.random.seed(100)
+# np.random.seed(20)
+np.random.seed(300)
+
 env = wrap_env(CartPoleEnv(render_mode="rgb_array"))
     
 models_ppo = {
@@ -48,8 +53,19 @@ agent_ppo = PPO(models=models_ppo,
 # run_name = '23-05-03_19-25-32-459262_PPO' # Good one.
 # run_name = '23-05-04_14-28-04-729217_PPO'
 # run_name = '23-05-04_15-17-28-709494_PPO'
-run_name = '23-05-05_19-09-33-464430_PPO_gaussian_mlp'
+run_name = '23-05-07_13-19-49-149746_PPO' #random.pkl, rand_v5_sde.pkl, num_sample=10
+# run_name = '23-05-07_13-39-12-120744_PPO' #learned.pkl, learned_v5_sde.pkl, num_sample=10
+# run_name = '23-05-07_14-03-44-120000_PPO' #learned.pkl, learned_v5_sde.pkl, num_sample=100
+
+# run_name = '23-05-05_13-10-21-947600_PPO'
+# run_name = '23-05-06_22-00-18-536904_PPO' #random.pkl
+# run_name = '23-05-05_12-44-43-599050_PPO' # A trained policy
+# run_name = '23-05-05_13-10-21-947600_PPO' # random.pkl
 load_str = os.path.abspath(os.path.join('runs', run_name, 'checkpoints', 'best_agent.pt'))
+
+# run_name = '23-05-07_14-43-46-039252_PPO' #learned.pkl, learned_v5_si_sde.pkl, num_sample=10
+# load_str = os.path.abspath(os.path.join('runs', run_name, 'checkpoints', 'agent_500000.pt'))
+
 agent_ppo.load(load_str)
 agent_ppo._rnn = None
 

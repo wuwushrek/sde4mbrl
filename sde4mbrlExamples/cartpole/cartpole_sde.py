@@ -34,7 +34,8 @@ class CartPoleSDE(ControlledSDE):
         self.state_scaling = jnp.array(self.params.get('state_scaling', [1.0] * self.n_x))
         # In case scaling factor is give, we also need to ensure scaling diffusion network inputs
         if 'state_scaling' in self.params:
-            self.reduced_state = lambda x : jnp.array([x[1]/self.state_scaling[1], jnp.sin(x[2]), jnp.cos(x[2]), x[-1]/self.state_scaling[-1]])
+            # self.reduced_state = lambda x : jnp.array([x[1]/self.state_scaling[1], jnp.sin(x[2]), jnp.cos(x[2]), x[-1]/self.state_scaling[-1]])
+            self.reduced_state = lambda x : jnp.array([x[1], jnp.sin(x[2]), jnp.cos(x[2]), x[-1]]) / self.state_scaling[-1]
     
 
     def prior_diffusion(self, x, u, extra_args=None):
@@ -65,19 +66,37 @@ class CartPoleSDE(ControlledSDE):
             # Scaled state
             xdotdot, theta_dotdot = nn_out_scale * self.residual_nn(jnp.array([sin_theta_sc, cos_theta_sc, theta_dot_sc, uval]))
             return jnp.array([xdot, xdotdot, theta_dot, theta_dotdot])
+        
+        # If side information is included
+        xdotdot, theta_dotdot = self.residual_nn(jnp.array([sin_theta_sc, cos_theta_sc, theta_dot_sc]))
+        # Compute the control
+        ctrl_eff = self.control_nn(jnp.array([cos_theta_sc, cos_theta_sc**2])) * uval
+        xdotdot = nn_out_scale[0] * (xdotdot + ctrl_eff[0])
+        theta_dotdot = nn_out_scale[1] * (theta_dotdot + ctrl_eff[1])
+        return jnp.array([xdot, xdotdot, theta_dot, theta_dotdot])
     
     def init_residual_networks(self):
         """Initialize the residual networks.
         """
+        assert 'residual_forces' in self.params, 'The residual network must be defined in the yaml file'
+        _act_fn = self.params['residual_forces']['activation_fn']
+        init_value = self.params['residual_forces'].get('init_value', 1e-3) # Small non-zero value
+        self.residual_nn = hk.nets.MLP([*self.params['residual_forces']['hidden_layers'], 2],
+                                            activation = getattr(jnp, _act_fn) if hasattr(jnp, _act_fn) else getattr(jax.nn, _act_fn),
+                                            w_init=hk.initializers.RandomUniform(-init_value, init_value),
+                                            name = 'res_forces')
+        
         if not self.params.get('side_info', False):
-            assert 'residual_forces' in self.params, 'The residual network must be defined in the yaml file'
-            _act_fn = self.params['residual_forces']['activation_fn']
-            init_value = self.params['residual_forces'].get('init_value', 1e-3) # Small non-zero value
-            self.residual_nn = hk.nets.MLP([*self.params['residual_forces']['hidden_layers'], 2],
-                                                activation = getattr(jnp, _act_fn) if hasattr(jnp, _act_fn) else getattr(jax.nn, _act_fn),
-                                                w_init=hk.initializers.RandomUniform(-init_value, init_value),
-                                                name = 'res_forces')
             return
+        
+        # If side information is included, extract the nn for the control stored in 'control_nn'
+        assert 'control_nn' in self.params, 'The control network must be defined in the yaml file'
+        _act_fn_ctrl = self.params['control_nn']['activation_fn']
+        init_value_ctrl = self.params['control_nn'].get('init_value', 1e-3) # Small non-zero value
+        self.control_nn = hk.nets.MLP([*self.params['control_nn']['hidden_layers'], 2],
+                                            activation = getattr(jnp, _act_fn_ctrl) if hasattr(jnp, _act_fn_ctrl) else getattr(jax.nn, _act_fn_ctrl),
+                                            w_init=hk.initializers.RandomUniform(-init_value_ctrl, init_value_ctrl),
+                                            name = 'control_nn')
 
 #### GYm wrapper environment for the cartpole SDE model ####
 def cartpole_sde_gym(filename='my_models/cartpole_bb_sde.pkl', num_particles=1, tau=0.02,
@@ -222,7 +241,10 @@ def load_learned_diffusion(model_path, num_samples=1):
     def diffusion_fn(y, rng, net=False):
         m_rng = jax.random.split(rng, num_samples)
         # We use zero control input
-        return jax.vmap(m_diff_fn, in_axes=(None, None, None, 0, None))(_sde_learned, y, jnp.array([0.0]), m_rng, net)
+        print(y, y.shape)
+        _val = jax.vmap(m_diff_fn, in_axes=(None, None, None, 0, None))(_sde_learned, y, jnp.array([0.0]), m_rng, net)
+        print(_val)
+        return _val
     
     return diffusion_fn
 
