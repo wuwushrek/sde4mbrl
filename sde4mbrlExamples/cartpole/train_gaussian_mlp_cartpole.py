@@ -27,8 +27,8 @@ def run_training(cfg, data_file_name, test_data_file_name='learned.pkl', seed=42
     with open(os.path.abspath(os.path.join(data_path, test_data_file_name)), 'rb') as f:
         test_data = pickle.load(f)
 
-    num_train_datapoints = len(data) * data[0][0].shape[-1]
-    num_test_datatpoints = len(test_data) * test_data[0][0].shape[-1]
+    num_train_datapoints = len(data) * data[0][0].shape[0]
+    num_test_datatpoints = len(test_data) * test_data[0][0].shape[0]
 
     train_buffer = populate_replay_buffers(data, num_train_datapoints, save_actions=True)
     test_buffer = populate_replay_buffers(test_data, num_test_datatpoints, save_actions=True)
@@ -85,8 +85,8 @@ if __name__ == '__main__':
 
     data_dir = os.path.abspath(os.path.join(os.path.curdir, 'my_data'))
     
-    data_file_name = 'no_actions.pkl'
-    test_data_file_name = 'no_actions.pkl'
+    data_file_name = 'learned.pkl'
+    test_data_file_name = 'learned.pkl'
     
     print("Training on {}".format(data_file_name))
     
