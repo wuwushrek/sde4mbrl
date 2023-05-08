@@ -10,8 +10,8 @@ ensemble_cfg = omegaconf.OmegaConf.create({
     "trainer_setup" : {
         "optim_lr" : 0.001,
         "weight_decay" : 5e-5,
-        "num_epochs" : 5000,
-        "patience" : 2000,
+        "num_epochs" : 1000,
+        "patience" : 100,
         "batch_size" : 32,
         "model_checkpoint_frequency" : 100,
     },

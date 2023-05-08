@@ -34,16 +34,16 @@ env = cartpole_sde_gym(filename='~/Documents/sde4mbrl/sde4mbrlExamples/cartpole/
 # env = cartpole_sde_gym(filename='~/Documents/sde4mbrl/sde4mbrlExamples/cartpole/my_models/cartpole_bb_rand_sde.pkl', num_particles=1, 
 #                        jax_seed=10, use_gpu=True, jax_gpu_mem_frac=0.2,)
     
-# env = CartPoleGaussianMLPEnv(
-#     load_file_name = os.path.abspath(
-#         os.path.join(os.path.curdir, 'my_models', 'gaussian_mlp_ensemble_cartpole_learned')
-#     ),
-#     num_particles = 1,
-#     torch_seed = 42,
-#     use_gpu = True,
-# )
+env = CartPoleGaussianMLPEnv(
+    load_file_name = os.path.abspath(
+        os.path.join(os.path.curdir, 'my_models', 'gaussian_mlp_ensemble_cartpole_learned')
+    ),
+    num_particles = 1,
+    torch_seed = 42,
+    use_gpu = True,
+)
 
-env = CartPoleEnv()
+# env = CartPoleEnv()
 env = wrap_env(env)
 
 device = env.device

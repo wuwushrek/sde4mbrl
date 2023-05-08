@@ -16,7 +16,7 @@ device = torch.device(device_str)
 seed = 42
 
 # Load the model
-experiment_name = 'gaussian_mlp_ensemble_cartpole_learned'
+experiment_name = 'gaussian_mlp_ensemble_cartpole_random'
 load_dir = os.path.abspath(os.path.join(os.path.curdir, 'my_models', experiment_name))
 dynamics_model, cfg = load_model_and_config(load_dir, propagation_method="expectation")
 
