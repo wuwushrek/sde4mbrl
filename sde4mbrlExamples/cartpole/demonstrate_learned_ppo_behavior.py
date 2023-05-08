@@ -47,7 +47,8 @@ agent_ppo = PPO(models=models_ppo,
 # run_name = '23-05-03_18-24-19-763565_PPO'
 # run_name = '23-05-03_19-25-32-459262_PPO' # Good one.
 # run_name = '23-05-04_14-28-04-729217_PPO'
-run_name = '23-05-04_15-17-28-709494_PPO'
+# run_name = '23-05-04_15-17-28-709494_PPO'
+run_name = '23-05-05_19-09-33-464430_PPO_gaussian_mlp'
 load_str = os.path.abspath(os.path.join('runs', run_name, 'checkpoints', 'best_agent.pt'))
 agent_ppo.load(load_str)
 agent_ppo._rnn = None
