@@ -147,7 +147,7 @@ def cartpole_sde_gym(filename='my_models/cartpole_bb_sde.pkl', num_particles=1, 
     class CartPoleSDEEnv(CartPoleEnv):
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
-            self._rng = jax.random.PRNGKey(jax_seed)
+            self.reset_model_seed()
             self._sde_pred_fn = sde_pred_fn
 
         def step_dynamics(self, action):
@@ -164,6 +164,9 @@ def cartpole_sde_gym(filename='my_models/cartpole_bb_sde.pkl', num_particles=1, 
         def get_obs(self, state):
             x, x_dot, theta, theta_dot = state
             return np.array((x, x_dot, np.sin(theta), np.cos(theta), theta_dot))
+        
+        def reset_model_seed(self,):
+            self._rng = jax.random.PRNGKey(jax_seed)
 
     return CartPoleSDEEnv(**kwargs)
 

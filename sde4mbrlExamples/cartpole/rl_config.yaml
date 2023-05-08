@@ -1,0 +1,55 @@
+##########################################################################
+# Configuration file for training policies for the learned dynamics models
+
+# # Cartpole environment extra args
+# env_extra_args:
+#   max_steps: 200
+
+# SDE extra arguments
+sde_extra_args:
+  num_particles : 10
+  use_gpu : True
+  jax_gpu_mem_frac : 0.4
+
+# Gaussian ensemble extra arguments
+GE_extra_args:
+  num_particles : 1
+  use_gpu : True
+
+# Seed numbers
+seeds : [5, 25, 105, 305, 1005]
+
+# Trainer configuration dictionary
+cfg_trainer_ppo:
+  timesteps : 600000 # Training time step, 700000
+  headless : True
+  disable_progressbar : False
+
+# Extra parameters to the ppo -> PPO_DEFAULT_CONFIG: ppo.py
+extra_alg_dict_ppo:
+  rollouts: 2048 # number of steps per environment per update
+
+# Value and Policy networks initialization parameters
+pol_val_init_params_ppo:
+  method_name : normal_
+  mean : 0.0
+  std : 0.1
+
+################################################################################
+######################## Plotting reward configuration #########################
+
+model_names:
+  - groundtruth_PPO
+  - cartpole_bb_random_sde_PPO
+  - cartpole_bb_learned_sde_PPO
+  - cartpole_bb_learned_si_sde_PPO
+recompute_all: False
+# outfile: 'rewards_data.pkl'
+outfile: 'rewards_data_v2.pkl'
+seed_eval: 42
+env_extra_args_eval:
+  init_lb: [-0.2, -0.5, 2.8, -0.3]
+  init_ub: [0.2, 0.5, 3.3, 0.3]
+num_eval_episodes: 1
+# We take checkpoints every checkpoints_spacer checkpoints
+checkpoints_spacer: 10

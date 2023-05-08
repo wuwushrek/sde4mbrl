@@ -1,9 +1,10 @@
+import os
+
 import numpy as np
-import sys, os
-from modified_cartpole_continuous import CartPoleEnv
+
+from sde4mbrlExamples.cartpole.modified_cartpole_continuous import CartPoleEnv
 from typing import Optional
 
-sys.path.append("../..")
 from mbrlLibUtils.save_and_load_models import load_model_and_config
 
 import torch
@@ -77,6 +78,10 @@ class CartPoleGaussianMLPEnv(CartPoleEnv):
     def get_obs(self, state):
         x, x_dot, theta, theta_dot = state
         return np.array((x, x_dot, np.sin(theta), np.cos(theta), theta_dot))
+    
+    def reset_model_seed(self,):
+        if self.torch_seed is not None:
+            self.generator.manual_seed(self.torch_seed)
     
 if __name__ == '__main__':
     
