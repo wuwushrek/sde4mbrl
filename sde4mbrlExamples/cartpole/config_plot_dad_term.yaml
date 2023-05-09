@@ -1,0 +1,64 @@
+###################################################################################################################
+####################################### Plotting and other configuration  #########################################
+###################################################################################################################
+
+
+# Range used for the mesh plot
+thetarange: [-4.14, 4.14]
+thetadotrange: [-20, 20]
+# Number of grids on the axes
+num_grid_theta: 200
+num_grid_thetadot: 200
+
+num_particles_diffusion: 1 # If the observation to state is nondeterministic, this is used
+
+# Seed for operations related to the density estimation
+seed_mesh: 10
+
+training_dataset_config:
+  label : 'Dataset'
+  color : 'lavender'
+  marker: 'x'
+  markersize : 8 
+  alpha : 1.0
+  linestyle : 'None'
+  zorder : 100
+
+mesh_args:
+  cmap: viridis
+  shading: gouraud
+
+colorbar_args:
+  shrink: 0.95
+  # extend: both
+  pad: 0.01
+
+extra_args:
+  title_right_args:
+    rotation: -90
+    size: large
+    labelpad: 15
+
+# The list of models to plot in the configuration (usually a grid) they need to be plotted
+fig_args:
+  figsize: [8, 8]
+  nrows: 1
+  ncols: 1
+  sharex: True
+  sharey: True
+  constrained_layout: True
+
+# # Plotting the neural network inside the density term or the density itself
+# net: True
+
+# Filename of the training dataset used for each model to plo
+train_data: 'learned.pkl'
+
+plot_configs:
+  - value: 'cartpole_bb_learned_v5_si_sde.pkl'
+    # train_data: 'learned.pkl'
+    title: 'Density on learned.pkl'
+
+save_config:
+  fname: 'density_traj_vs_gradCost.png'
+  dpi: 500

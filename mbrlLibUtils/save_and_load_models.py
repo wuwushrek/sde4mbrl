@@ -63,7 +63,7 @@ def load_model_and_config(save_dir, propagation_method=None):
     with open(config_file_str, 'rb') as f:
         config = pickle.load(f)
 
-    config['dynamics_model']['model']['propagation_method'] = propagation_method
+    config['dynamics_model']['propagation_method'] = propagation_method
 
     model = common_utils.create_one_dim_tr_model(config, config['obs_shape'], config['action_shape'])
 

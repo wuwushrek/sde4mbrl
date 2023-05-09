@@ -6,27 +6,36 @@ import numpy as np
 from gymnasium import logger, spaces
 from gymnasium.error import DependencyNotInstalled
 
-
 class CartPoleEnv(gym.Env):
     # This is a continuous version of gym's cartpole environment, with the only difference
     # being valid actions are any numbers in the range [-1, 1], and the are applied as
     # a multiplicative factor to the total force.
     metadata = {"render.modes": ["human", "rgb_array"], "video.frames_per_second": [50]}
 
-    def __init__(self, max_steps=200, render_mode: Optional[str] = None):
+    def __init__(
+                self, 
+                max_steps=200, 
+                init_lb: list = [-1.0, -1.0, np.pi - 0.8, -0.8],
+                init_ub: list = [1.0, 1.0, np.pi + 0.8, 0.8],
+                measurement_noise_diag: list = [0.005, 0.01, 0.009, 0.05],
+                render_mode: Optional[str] = None
+                ):
         self.gravity = 9.8
         self.masscart = 1.0
         self.masspole = 0.1
         self.total_mass = self.masspole + self.masscart
         self.length = 0.5  # actually half the pole's length
         self.polemass_length = self.masspole * self.length
-        self.force_mag = 50 # 10.0
+        self.force_mag = 25 # 50.0
         self.tau = 0.02  # seconds between state updates
         self.kinematics_integrator = "euler"
         self.max_steps = max_steps
 
-        # Angle at which to fail the episode
-        # self.theta_threshold_radians = 12 * 2 * math.pi / 360
+        self.init_lb = init_lb
+        self.init_ub = init_ub
+        self.measurement_noise_diag = measurement_noise_diag
+
+        # Position at which to fail the episode
         self.x_threshold = 120.0 # 2.4
 
         # Angle limit set to 2 * theta_threshold_radians so failing observation
@@ -60,9 +69,7 @@ class CartPoleEnv(gym.Env):
 
         self.steps_beyond_terminated = None
 
-    def step(self, action):   
-        self.elapsed_steps += 1     
-        action = action.squeeze()
+    def step_dynamics(self, action):
         x, x_dot, theta, theta_dot = self.state
         force = action * self.force_mag
         costheta = math.cos(theta)
@@ -91,6 +98,14 @@ class CartPoleEnv(gym.Env):
 
         self.state = (x, x_dot, theta, theta_dot)
 
+
+    def step(self, action):   
+        self.elapsed_steps += 1     
+        action = action.squeeze()
+        
+        self.step_dynamics(action)
+
+        x, x_dot, theta, theta_dot = self.state
         terminated = bool(
             x < -self.x_threshold
             or x > self.x_threshold
@@ -112,7 +127,11 @@ class CartPoleEnv(gym.Env):
                 )
             self.steps_beyond_terminated += 1
 
-        reward = np.cos(theta) - 0.1 * np.abs(x)
+        reward = np.cos(theta) \
+                - 0.01 * np.abs(x) \
+                - np.sum(np.abs(action)) \
+                - 0.1 * np.abs(theta_dot) \
+                    - 0.1 * np.abs(x_dot)
 
         if self.render_mode == "human":
             self.render()
@@ -122,18 +141,20 @@ class CartPoleEnv(gym.Env):
     def reset(self, seed: Optional[int] = None):
         super().reset(seed=seed)
         self.elapsed_steps = 0
-        x = 0.0
-        x_dot = self.np_random.uniform(low=-0.05, high=0.05)
-        theta = np.pi
-        theta_dot = self.np_random.uniform(low=-0.05, high=0.05)
-        self.state = (x, x_dot, theta, theta_dot)
+        # x = 0.0
+        # x_dot = self.np_random.uniform(low=-0.05, high=0.05)
+        # theta = np.pi
+        # theta_dot = self.np_random.uniform(low=-0.05, high=0.05)
+        # self.state = (x, x_dot, theta, theta_dot)
+        self.state = np.random.uniform(self.init_lb, self.init_ub)
         self.steps_beyond_terminated = None
         if self.render_mode == "human":
             self.render()
         return self.get_obs(self.state), {}
 
     def get_obs(self, state):
-        x, x_dot, theta, theta_dot = state
+        x, x_dot, theta, theta_dot = state + \
+            np.random.multivariate_normal(np.zeros((4)), np.diag(self.measurement_noise_diag))
         return np.array((x, x_dot, np.sin(theta), np.cos(theta), theta_dot))
 
     def render(self):
@@ -168,7 +189,7 @@ class CartPoleEnv(gym.Env):
         world_width = self.x_threshold * 2
         scale = self.screen_width / world_width
         polewidth = 10.0
-        polelen = scale * (2 * self.length)
+        polelen = 30.0 * scale * (2 * self.length)
         cartwidth = 50.0
         cartheight = 30.0
 

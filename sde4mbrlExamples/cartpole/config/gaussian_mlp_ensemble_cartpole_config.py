@@ -5,13 +5,13 @@ device_str = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
 ensemble_cfg = omegaconf.OmegaConf.create({
     # dynamics model configuration
-    "obs_shape" : (2,),
-    "action_shape" : (0,),
+    "obs_shape" : (5,),
+    "action_shape" : (1,),
     "trainer_setup" : {
         "optim_lr" : 0.001,
         "weight_decay" : 5e-5,
-        "num_epochs" : 5000,
-        "patience" : 2000,
+        "num_epochs" : 1000,
+        "patience" : 100,
         "batch_size" : 32,
         "model_checkpoint_frequency" : 100,
     },
@@ -21,8 +21,8 @@ ensemble_cfg = omegaconf.OmegaConf.create({
         "num_layers": 3,
         "ensemble_size": 5,
         "hid_size": 64,
-        "in_size": 2,
-        "out_size": 2,
+        "in_size": 6,
+        "out_size": 5,
         "deterministic": False,
         # "propagation_method": "fixed_model",
         "activation_fn_cfg": {

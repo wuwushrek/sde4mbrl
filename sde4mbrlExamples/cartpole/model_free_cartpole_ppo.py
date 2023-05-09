@@ -1,7 +1,9 @@
 # Import the skrl components to build the RL system
 
-from modified_cartpole_continuous import CartPoleEnv
+import sys, os
+sys.path.append('../..')
 
+from modified_cartpole_continuous import CartPoleEnv
 
 import torch
 import torch.nn as nn
@@ -16,40 +18,33 @@ from skrl.resources.noises.torch import OrnsteinUhlenbeckNoise
 from skrl.trainers.torch import SequentialTrainer
 from skrl.envs.torch import wrap_env
 
+from mbrlLibUtils.rl_networks import Value, Policy
 
-class Policy(GaussianMixin, Model):
-    def __init__(self, observation_space, action_space, device,
-                 clip_actions=False, clip_log_std=True, min_log_std=-20, max_log_std=2, reduction="sum"):
-        Model.__init__(self, observation_space, action_space, device)
-        GaussianMixin.__init__(self, clip_actions, clip_log_std, min_log_std, max_log_std, reduction)
+from mbrlLibUtils.rl_networks import Value, Policy
 
-        self.net = nn.Sequential(nn.Linear(self.num_observations, 64),
-                                 nn.ReLU(),
-                                 nn.Linear(64, 32),
-                                 nn.ReLU(),
-                                 nn.Linear(32, self.num_actions),
-                                 nn.Tanh())
+from sde4mbrlExamples.cartpole.cartpole_sde import cartpole_sde_gym
+from sde4mbrlExamples.cartpole.cartpole_gym_mlp import CartPoleGaussianMLPEnv
 
-        self.log_std_parameter = nn.Parameter(torch.zeros(self.num_actions))
+from datetime import datetime
 
-    def compute(self, inputs, role):
-        return self.net(inputs["states"]), self.log_std_parameter, {}
+experiment_name = datetime.now().strftime("%y-%m-%d_%H-%M-%S-%f") + "_PPO_true_env"
 
-class Value(DeterministicMixin, Model):
-    def __init__(self, observation_space, action_space, device, clip_actions=False):
-        Model.__init__(self, observation_space, action_space, device)
-        DeterministicMixin.__init__(self, clip_actions)
+env = cartpole_sde_gym(filename='~/Documents/sde4mbrl/sde4mbrlExamples/cartpole/my_models/cartpole_bb_learned_v5_si_sde.pkl', num_particles=10, 
+                       jax_seed=10, use_gpu=True, jax_gpu_mem_frac=0.4,)
+# env = cartpole_sde_gym(filename='~/Documents/sde4mbrl/sde4mbrlExamples/cartpole/my_models/cartpole_bb_rand_sde.pkl', num_particles=1, 
+#                        jax_seed=10, use_gpu=True, jax_gpu_mem_frac=0.2,)
+    
+env = CartPoleGaussianMLPEnv(
+    load_file_name = os.path.abspath(
+        os.path.join(os.path.curdir, 'my_models', 'gaussian_mlp_ensemble_cartpole_learned')
+    ),
+    num_particles = 1,
+    torch_seed = 42,
+    use_gpu = True,
+)
 
-        self.net = nn.Sequential(nn.Linear(self.num_observations, 64),
-                                 nn.ReLU(),
-                                 nn.Linear(64, 32),
-                                 nn.ReLU(),
-                                 nn.Linear(32, 1))
-
-    def compute(self, inputs, role):
-        return self.net(inputs["states"]), {}
-
-env = wrap_env(CartPoleEnv())
+# env = CartPoleEnv()
+env = wrap_env(env)
 
 device = env.device
 
@@ -65,6 +60,7 @@ for model in models_ppo.values():
 # Configure and instantiate the agent.
 cfg_ppo = PPO_DEFAULT_CONFIG.copy()
 cfg_ppo['rollouts'] = 2048 # number of steps per environment per update
+cfg_ppo['experiment']['experiment_name'] = experiment_name
 
 # Instantiate a RandomMemory (without replacement) as experience replay memory
 memory = RandomMemory(memory_size=cfg_ppo['rollouts'], num_envs=env.num_envs, device=device, replacement=False)
@@ -76,11 +72,9 @@ agent_ppo = PPO(models=models_ppo,
                   action_space=env.action_space,
                   device=device)
 
-
 # Configure and instantiate the RL trainer
-cfg_trainer = {"timesteps": 150000, "headless": True}
+cfg_trainer = {"timesteps": int(7e5), "headless": True}
 trainer = SequentialTrainer(cfg=cfg_trainer, env=env, agents=agent_ppo)
 
 # start training
 trainer.train()
-
