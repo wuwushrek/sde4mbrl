@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sys, os
 
-sys.path.append('../../mbrl_lib_utils')
+sys.path.append('../..')
 from mbrlLibUtils.save_and_load_models import save_model_and_config, load_model_and_config
     
 from mbrlLibUtils.replay_buffer_utils import generate_sample_trajectories
