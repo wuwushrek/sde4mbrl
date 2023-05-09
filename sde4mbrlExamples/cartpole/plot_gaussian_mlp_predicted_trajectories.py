@@ -18,7 +18,7 @@ seed = 42
 # Load the model
 experiment_name = 'gaussian_mlp_ensemble_cartpole_random'
 load_dir = os.path.abspath(os.path.join(os.path.curdir, 'my_models', experiment_name))
-dynamics_model, cfg = load_model_and_config(load_dir, propagation_method="expectation")
+dynamics_model, cfg = load_model_and_config(load_dir, propagation_method="fixed_model")
 
 # Load the dataset
 data_path = os.path.abspath(os.path.join(os.path.curdir, 'my_data'))
