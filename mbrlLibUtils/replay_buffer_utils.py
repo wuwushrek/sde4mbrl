@@ -39,6 +39,29 @@ def populate_replay_buffers(dataset : tuple, buffer_size : int, save_actions : b
 
     return replay_buffer
 
+# def generate_nsde_training_dataset_from_replay_buffer(replay_buffer, num_samples, batch_size, device):
+#     """
+#     Generate training dataset for the NSDE from the replay buffer.
+
+#     Parameters
+#     ----------
+#     replay_buffer : mbrl.util.replay_buffer.ReplayBuffer
+#         Replay buffer containing the dataset of trajectories.
+#     num_samples : int
+#         Number of samples to generate.
+#     batch_size : int
+#         Batch size for the training dataset.
+#     device : torch.device
+#         Device to use for the computations.
+
+#     Returns
+#     -------
+#     training_dataset : torch.utils.data.DataLoader
+#         Training dataset for the NSDE.
+#     """
+#     training_dataset = replay_buffer.sample(num_samples, batch_size, device)
+#     return training_dataset
+
 def generate_sample_trajectories(init_state, num_particles, dynamics_model, generator, time_horizon, ufun=None, device=None):
     """
     Generate sample trajectories from the dynamics model
