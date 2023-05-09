@@ -23,6 +23,8 @@ from sde4mbrlExamples.cartpole.modified_cartpole_continuous import CartPoleEnv
 
 from tqdm.auto import tqdm
 
+import yaml
+
 def load_model_env(
         model_file,
         model_dir,
@@ -295,7 +297,7 @@ def simulate_model(model_name, cfg_dict, groundtruth=False):
         checkpoints_iter_per_seed.append(checkpoints_iter)
     # Check if the checkpints are saved at the same iteration
     assert np.all([np.all(np.array(checkpoints_iter_per_seed[0]) == np.array(checkpoints_iter_per_seed[i])) for i in range(1, len(checkpoints_iter_per_seed))]), 'The checkpoints are not saved at the same iteration'
-    return rewards_per_seed, checkpoints_iter_per_seed
+    return rewards_per_seed, checkpoints_iter
 
 
 # Load a pkl file
@@ -318,31 +320,268 @@ def generate_plotData_from_cfg(cfg_dict):
         if model_name in outfile_dict.keys():
             continue
         # Simulate the model
-        rewards_per_seed, checkpoints_iter_per_seed = simulate_model(model_name, cfg_dict)
+        rewards_per_seed, checkpoints_iter = simulate_model(model_name, cfg_dict)
         # Simulate the model in the groundtruth environment
-        rewards_per_seed_gt, checkpoints_iter_per_seed_gt = simulate_model(model_name, cfg_dict, groundtruth=True)
+        rewards_per_seed_gt, _ = simulate_model(model_name, cfg_dict, groundtruth=True)
         # Store the results
         outfile_dict[model_name] = {
             'rewards_per_seed': rewards_per_seed,
-            'checkpoints_iter_per_seed': checkpoints_iter_per_seed,
-            'rewards_per_seed_gt': rewards_per_seed_gt,
-            'checkpoints_iter_per_seed_gt': checkpoints_iter_per_seed_gt,
+            'checkpoints_iter': checkpoints_iter,
+            'rewards_per_seed_gt': rewards_per_seed_gt
         }
         # Save the results
         with open(data_dir + outfile, 'wb') as f:
             pickle.dump(outfile_dict, f)
 
+def get_best_agent(model_name, mydata, min_num_interaction=20000):
+    """ Get the best mean reward from the reward data
+    """
+    rew_dict = mydata[model_name.split('_gt')[0]]
+    rewValues = np.array(rew_dict['rewards_per_seed']) if not model_name.endswith('_gt') else np.array(rew_dict['rewards_per_seed_gt'])
+    xValues = np.array(rew_dict['checkpoints_iter'])
+    # Exchange the last two axes
+    assert len(rewValues.shape) == 3, 'The shape of the rewards array is not correct'
+    assert rewValues.shape[-2] == len(xValues), 'The number of checkpoints is not the same as the number of rewards'
+    rewValues = rewValues.transpose((0, 2, 1))
+    rewValues = rewValues.reshape((-1, rewValues.shape[-1]))
+    rewValues_mean = np.mean(rewValues, axis=0)
+    # Find the first index where the number of interactions is greater than min_num_interaction
+    idx = [ i for i in range(len(xValues)) if xValues[i] > min_num_interaction ][0]
+    # Get the best mean reward
+    # print("idx, ", idx, "xValues[idx], ", xValues[idx])
+    best_mean_reward_min = np.max(rewValues_mean[:idx])
+    best_mean_reward_max = np.max(rewValues_mean)
+    return best_mean_reward_min, best_mean_reward_max
+
+def generate_barplot_data(cfg_dict):
+    """ Generate the data for the barplot in the paper and save it as a yaml file in my_data
+    """
+    # Load the data
+    data_dir = os.path.dirname(os.path.realpath(__file__)) + '/my_data/'
+    outfile = cfg_dict['outfile']
+    with open(data_dir + outfile, 'rb') as f:
+        mydata = pickle.load(f)
+    # Dictionary to store the results
+    dict_results = {}
+    for model_name in cfg_dict['model_names']:
+        # Get the best reward from the groundtruth
+        _rewValues = np.array(mydata[model_name]['rewards_per_seed'])
+        rewValues = _rewValues.transpose((0, 2, 1))
+        mean_rew_numEpisodes = np.mean(rewValues, axis=1)
+        rewValues = rewValues.reshape((-1, rewValues.shape[-1]))
+        _rewValues_gt = np.array(mydata[model_name]['rewards_per_seed_gt'])
+        rewValues_gt = _rewValues_gt.transpose((0, 2, 1))
+        mean_rew_numEpisodes_gt = np.mean(rewValues_gt, axis=1)
+        rewValues_gt = rewValues_gt.reshape((-1, rewValues_gt.shape[-1]))
+        # Get the best mean reward
+        mean_reward = np.mean(rewValues, axis=0)
+        std_reward = np.std(rewValues, axis=0)
+        mean_reward_gt = np.mean(rewValues_gt, axis=0)
+        std_reward_gt = np.std(rewValues_gt, axis=0)
+        # Get the best mean reward and corresponding std
+        best_mean_reward = np.max(mean_reward)
+        best_std_reward = std_reward[np.argmax(mean_reward)]
+        best_mean_reward_gt = np.max(mean_reward_gt)
+        best_std_reward_gt = std_reward_gt[np.argmax(mean_reward_gt)]
+        # Max rewards per seed
+        max_rew_array = np.max(mean_rew_numEpisodes, axis=1)
+        max_rew_per_seed = np.mean(max_rew_array)
+        std_max_rew_per_seed = np.std(max_rew_array)
+
+        max_rew_array_gt = np.max(mean_rew_numEpisodes_gt, axis=1)
+        max_rew_per_seed_gt = np.mean(max_rew_array_gt)
+        std_max_rew_per_seed_gt = np.std(max_rew_array_gt)
+        # COmpute gaps between rewValues and rewValues_gt
+        gaps = np.mean(np.abs(_rewValues.transpose((0, 2, 1)).mean(axis=1) - _rewValues_gt.transpose((0, 2, 1)).mean(axis=1) ) )
+
+        # Store the results
+        dict_results[model_name] = {
+            'best_mean_reward': float(best_mean_reward),
+            'std_best_reward': float(best_std_reward),
+            'best_mean_reward_gt': float(best_mean_reward_gt),
+            'std_best_reward_gt': float(best_std_reward_gt),
+            '_max_rew_per_seed': float(max_rew_per_seed),
+            '_std_max_rew_per_seed': float(std_max_rew_per_seed),
+            '_max_rew_per_seed_gt': float(max_rew_per_seed_gt),
+            '_std_max_rew_per_seed_gt': float(std_max_rew_per_seed_gt),
+            '_gap': float(gaps)
+        }
+    # Now lets iterate and add a normalized reward and std based on the groundtruth
+    scaling_factor = dict_results[cfg_dict['scaling_baseline_model']]['best_mean_reward']
+    scaling_factor_max = dict_results[cfg_dict['scaling_baseline_model']]['_max_rew_per_seed']
+    for model_name in cfg_dict['model_names']:
+        dict_results[model_name]['best_mean_reward_scaled'] = dict_results[model_name]['best_mean_reward'] / scaling_factor
+        dict_results[model_name]['std_best_reward_scaled'] = dict_results[model_name]['std_best_reward'] / scaling_factor
+        dict_results[model_name]['best_mean_reward_gt_scaled'] = dict_results[model_name]['best_mean_reward_gt'] / scaling_factor
+        dict_results[model_name]['std_best_reward_gt_scaled'] = dict_results[model_name]['std_best_reward_gt'] / scaling_factor
+        dict_results[model_name]['_max_rew_per_seed_scaled'] = dict_results[model_name]['_max_rew_per_seed'] / scaling_factor_max
+        dict_results[model_name]['_std_max_rew_per_seed_scaled'] = dict_results[model_name]['_std_max_rew_per_seed'] / scaling_factor_max
+        dict_results[model_name]['_max_rew_per_seed_gt_scaled'] = dict_results[model_name]['_max_rew_per_seed_gt'] / scaling_factor_max
+        dict_results[model_name]['_std_max_rew_per_seed_gt_scaled'] = dict_results[model_name]['_std_max_rew_per_seed_gt'] / scaling_factor_max
+
+    # Save the results as a yaml file
+    with open(data_dir + 'barplot_data.yaml', 'w') as f:
+        yaml.dump(dict_results, f)
+
+
+def plot_data(cfg_dict):
+    """
+    Plot the data
+    """
+    import matplotlib.pyplot as plt
+
+    # Load the plt style
+    texConfig = cfg_dict.get('texConfig', None)
+    if texConfig is not None:
+        plt.style.use(texConfig)
+
+    data_dir = os.path.dirname(os.path.realpath(__file__)) + '/my_data/'
+    outfile = cfg_dict['plot_data_file']
+    # Load the data
+    with open(data_dir + outfile, 'rb') as f:
+        mydata = pickle.load(f)
+
+    plot_configs = cfg_dict['plot_configs']
+
+    # Exract the figure and axis specifications
+    fig_specs = cfg_dict['fig_args']
+    nrows = fig_specs['nrows']
+    ncols = fig_specs['ncols']
+
+    # Check if the number of subplots is the same as the number of files to plot
+    assert nrows*ncols == len(plot_configs), "The number of subplots is not the same as the number of files to plot"
+
+    # Percentiles
+    alpha_percentiles = cfg_dict['alpha_percentiles']
+    percentiles_array = cfg_dict['percentiles_array']
+
+    # Curve plot style
+    curve_plot_style = cfg_dict['curve_plot_style']
+    general_style = cfg_dict.get('general_style', {})
+
+    # Create the figure
+    fig, axs_2d = plt.subplots(**fig_specs)
+    if hasattr(axs_2d, 'shape'):
+        axs = axs_2d.flatten()
+    else:
+        axs = [axs_2d]
+    
+    # Get the best reward from the groundtruth
+    dict_best_gt = {}
+    for best_rew_gt in cfg_dict.get('best_rew_gt', []):
+        gt_reward_equivalent_data, gt_reward_max = get_best_agent(best_rew_gt, mydata, 
+                    min_num_interaction=cfg_dict['total_env_interact_for_training_data'])
+        dict_best_gt[best_rew_gt] = (gt_reward_equivalent_data, gt_reward_max)
+
+    groundlabel_added = False
+
+    for conf, ax in zip(plot_configs, axs):
+
+        if not isinstance(conf['value'], list):
+            conf['value'] = [conf['value']]
+
+        for model_name in conf['value']:
+            plot_type = conf.get('type', None)
+
+            rew_dict = mydata[model_name.split('_gt')[0]]
+            rewValues = np.array(rew_dict['rewards_per_seed']) if not model_name.endswith('_gt') else np.array(rew_dict['rewards_per_seed_gt'])
+            xValues = np.array(rew_dict['checkpoints_iter'])
+            
+            # Exchange the last two axes
+            assert len(rewValues.shape) == 3, 'The shape of the rewards array is not correct'
+            assert rewValues.shape[-2] == len(xValues), 'The number of checkpoints is not the same as the number of rewards'
+            rewValues = rewValues.transpose((0, 2, 1))
+            rewValues = rewValues.reshape((-1, rewValues.shape[-1]))
+
+            if plot_type == 'gap':
+                rewValues_gt = np.array(rew_dict['rewards_per_seed_gt'])
+                rewValues_gt = rewValues_gt.transpose((0, 2, 1))
+                _rewValues_gt = np.mean(rewValues_gt, axis=1)
+                # rewValues_gt = rewValues_gt.reshape((-1, rewValues_gt.shape[-1]))
+                _rewValues = np.mean(rewValues.reshape((-1, rewValues_gt.shape[1], rewValues_gt.shape[2])), axis=1)
+                rewValues = np.abs(_rewValues_gt - _rewValues)
+                # SSmooth the data
+                # rewValues = np.array([np.convolve(rewValues[i,:], np.ones(3)/3, mode='same') for i in range(rewValues.shape[0])])
+
+            # We do the statistics
+            meanRew = np.mean(rewValues, axis=0)
+            cfg_dict['std_style'] = cfg_dict.get('std_style', None)
+            if cfg_dict['std_style'] == 'perc':
+                for _alph, _perc in zip(alpha_percentiles, percentiles_array):
+                    idx = int( (1 - _perc) / 2.0 * rewValues.shape[0] )
+                    q_bot = rewValues[idx,:]
+                    q_top = rewValues[-idx,:]
+                    ax.fill_between(xValues, q_bot, q_top, alpha=_alph, linewidth=0.0, color=curve_plot_style[model_name]['color_std'])
+            elif cfg_dict['std_style'] == 'std':
+                stdRew = np.std(rewValues, axis=0)
+                ax.fill_between(xValues, meanRew - stdRew, meanRew + stdRew, alpha=cfg_dict['alpha_std'], linewidth=0.0, color=curve_plot_style[model_name]['color_std'])
+            elif cfg_dict['std_style'] == 'minmax':
+                minRew = np.min(rewValues, axis=0)
+                maxRew = np.max(rewValues, axis=0)
+                ax.fill_between(xValues, minRew, maxRew, alpha=cfg_dict['alpha_std'], linewidth=0.0, color=curve_plot_style[model_name]['color_std'])
+            # Plot the mean
+            mean_style = curve_plot_style[model_name].copy()
+            mean_style.pop('color_std', None)
+            ax.plot(xValues, meanRew, **{**general_style, **mean_style})
+
+        # Set the x-axis and format it
+        if conf.get('xaxis', True):
+            ax.set_xlabel(r'Cartpole steps ($\times 10^5$)')
+            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:.0f}".format(x/100000)))
+        
+        # Add the groundtruth reward
+        for best_rew_gt in dict_best_gt.keys():
+            if plot_type == 'gap':
+                continue
+            gt_reward_equivalent_data, gt_reward_max = dict_best_gt[best_rew_gt]
+            ax.axhline(gt_reward_equivalent_data, **{**general_style, **curve_plot_style[best_rew_gt+'_data'], 
+                                                     'label': curve_plot_style[best_rew_gt+'_data']['label'] if not groundlabel_added else None
+                                                    }
+                        )
+            # ax.axhline(gt_reward_max, **{**general_style, **curve_plot_style[best_rew_gt+'_max'], 
+            #                                          'label': curve_plot_style[best_rew_gt+'_max']['label'] if not groundlabel_added else None
+            #                                         }
+            #             )
+            groundlabel_added = True
+
+        # Set the y-axis
+        if conf.get('yaxis', True):
+            if plot_type == 'gap':
+                ax.set_ylabel(r'Behavior gap')
+            else:
+                ax.set_ylabel(r'Cartpole total reward ($\times 10^2$)')
+                ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:.0f}".format(x/100)))
+
+        if not cfg_dict.get('global_legend', True):
+            ax.legend()
+
+        ax.grid(True)
+    
+
+    # Collect all the labels and show them in the legend
+    if  cfg_dict.get('global_legend', True):
+        fig.legend(**cfg_dict.get('extra_args',{}).get('legend_args', {}))
+
+    # Save the figure
+    if 'save_config' in cfg_dict.keys():
+        figure_out = data_dir + 'figures/'
+        cfg_dict['save_config']['fname'] = figure_out + cfg_dict['save_config']['fname']
+        fig.savefig(**cfg_dict['save_config'])
+
+    # Show the figure
+    plt.show()
 
 if __name__ == '__main__':
     import argparse
     # Argument parser
     parser = argparse.ArgumentParser(description='Train and evaluate an RL agent on a given environment')
-    parser.add_argument('--fun', type=str, default='train', help='The function to execute: train, evalpol, plot')
+    parser.add_argument('--fun', type=str, default='train', help='The function to execute: train, evalpol, plot, barplot')
     parser.add_argument('--cfg_path', type=str, default='rl_config.yaml', help='The path to the configuration file')
     parser.add_argument('--model_dir', type=str, default='my_models/', help='The directory where the models are stored')
     # Create model_file argument which can be a string or a list of strings
     parser.add_argument('--model_files', type=str,  nargs='+', default=['groundtruth',], help='The name of the models or model files')
     parser.add_argument('--method', type=str, default='ppo', help='The RL method to use')
+
     # Parse the arguments
     args = parser.parse_args()
 
@@ -353,3 +592,7 @@ if __name__ == '__main__':
         train(cfg_dict)
     elif args.fun == 'evalpol':
         generate_plotData_from_cfg(cfg_dict)
+    elif args.fun == 'plot':
+        plot_data(cfg_dict)
+    elif args.fun == 'barplot':
+        generate_barplot_data(cfg_dict)
