@@ -71,7 +71,15 @@ def load_model_and_config(save_dir, propagation_method=None):
 
     return model, config
 
-def load_learned_ensemble_model(model_path, horizon=1, num_samples=1, ufun=None, propagation_method="fixed_model", rseed=1000, prior_dist=False):
+def load_learned_ensemble_model(
+    model_path, 
+    horizon=1, 
+    num_samples=1, 
+    ufun=None, 
+    propagation_method="fixed_model", 
+    rseed=1000, 
+    prior_dist=False
+):
     """ Load the learned model from the path
 
         Args:
@@ -109,8 +117,8 @@ def load_learned_ensemble_model(model_path, horizon=1, num_samples=1, ufun=None,
     generator = torch.Generator(device=device)
     generator.manual_seed(rseed)
 
-    def sampling(y, rng):
-        return generate_sample_trajectories(y, num_samples, model, generator, time_horizon=horizon, ufun=ufun, device=device).cpu().numpy()
+    def sampling(y, u, rng):
+        return generate_sample_trajectories(y, num_samples, model, generator, time_horizon=horizon, ufun=ufun, control_inputs=u, device=device).cpu().numpy()
 
     _time_evol = np.arange(0, horizon + 1, 0.01)
 
