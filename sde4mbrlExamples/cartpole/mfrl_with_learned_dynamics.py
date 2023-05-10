@@ -12,6 +12,9 @@ from skrl.trainers.torch import SequentialTrainer
 from skrl.trainers.torch.sequential import SEQUENTIAL_TRAINER_DEFAULT_CONFIG
 from skrl.envs.torch import wrap_env
 
+import sys
+sys.path.append('../..')
+
 from mbrlLibUtils.rl_networks import Value, Policy
 
 from sde4mbrl.utils import update_params, load_yaml

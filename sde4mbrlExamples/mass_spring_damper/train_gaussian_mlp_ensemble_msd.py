@@ -96,7 +96,9 @@ def run_training(cfg, data_file_name, test_data_file_name = 'MSD_TestData.pkl', 
 
     # Save the learned model
     if save_results:
-        experiment_name = 'gaussian_mlp_ensemble' + '__' +  data_config_file_name[:data_config_file_name.index('_config')] + '_sde'
+        experiment_name = 'gaussian_mlp_ensemble_hid_' + str(cfg['dynamics_model']['model']['hid_size']) + \
+            '_ens_' + str(cfg['dynamics_model']['model']['ensemble_size']) + '__' + \
+                   data_config_file_name[:data_config_file_name.index('_config')] + '_sde'
         save_folder = os.path.abspath(os.path.join(os.path.curdir, 'my_models', experiment_name))
         save_model_and_config(dynamics_model, cfg, save_folder)
         train_callback.save_training_results(save_folder)
@@ -110,7 +112,6 @@ if __name__ == '__main__':
     from config.gaussian_mlp_ensemble_msd_config import ensemble_cfg as cfg
     seed = 42
 
-    # data_file_name = 'MSD_MeasLow_TopRight_10.pkl'
     test_data_file_name = 'MSD_TestData.pkl'
 
     data_dir = os.path.abspath(os.path.join(os.path.curdir, 'my_data'))

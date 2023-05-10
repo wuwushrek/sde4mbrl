@@ -107,14 +107,15 @@ def generate_sample_trajectories(
                 ), device=device)
                 next_obs, _, _, model_state = dynamics_model.sample(actions, model_state, rng=generator)
             sample_trajectories = torch.concatenate((sample_trajectories, next_obs.reshape(num_particles, 1, -1)), axis=1)
+        return sample_trajectories
+    else:
+        if ufun is None:
+            act_zero = torch.zeros((num_particles, act_size), device=device)
+            ufun = lambda state : act_zero
 
-    if ufun is None:
-        act_zero = torch.zeros((num_particles, act_size), device=device)
-        ufun = lambda state : act_zero
+        for t in range(time_horizon - 1):
+            with torch.no_grad():
+                next_obs, _, _, model_state = dynamics_model.sample(ufun(model_state), model_state, rng=generator)
+            sample_trajectories = torch.concatenate((sample_trajectories, next_obs.reshape(num_particles, 1, -1)), axis=1)
 
-    for t in range(time_horizon - 1):
-        with torch.no_grad():
-            next_obs, _, _, model_state = dynamics_model.sample(ufun(model_state), model_state, rng=generator)
-        sample_trajectories = torch.concatenate((sample_trajectories, next_obs.reshape(num_particles, 1, -1)), axis=1)
-
-    return sample_trajectories
+        return sample_trajectories
