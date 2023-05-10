@@ -52,6 +52,42 @@ cartpole_bb_random_sde_PPO:
   std_best_reward_gt: 35.88094187660011
   std_best_reward_gt_scaled: 2.8059528166168746
   std_best_reward_scaled: 2.2559006631062344
+gaussian_mlp_ensemble_cartpole_learned_PPO:
+  _gap: 782.326372650835
+  _max_rew_per_seed: 85.70240034037097
+  _max_rew_per_seed_gt: -365.77469350286066
+  _max_rew_per_seed_gt_scaled: -15.639369688427173
+  _max_rew_per_seed_scaled: 3.66436373515317
+  _std_max_rew_per_seed: 16.264674849495094
+  _std_max_rew_per_seed_gt: 27.784903496002148
+  _std_max_rew_per_seed_gt_scaled: 1.1879946460206705
+  _std_max_rew_per_seed_scaled: 0.6954260842852104
+  best_mean_reward: 81.01651229492977
+  best_mean_reward_gt: -411.4386181736852
+  best_mean_reward_gt_scaled: -32.17522420397508
+  best_mean_reward_scaled: 6.335633876285923
+  std_best_reward: 32.90059128478262
+  std_best_reward_gt: 86.15178433572228
+  std_best_reward_gt_scaled: 6.737221189587548
+  std_best_reward_scaled: 2.572884153972045
+gaussian_mlp_ensemble_cartpole_random_PPO:
+  _gap: 33.1301481627105
+  _max_rew_per_seed: -170.61784386127178
+  _max_rew_per_seed_gt: -154.84509892862758
+  _max_rew_per_seed_gt_scaled: -6.620686968238675
+  _max_rew_per_seed_scaled: -7.2950796842589805
+  _std_max_rew_per_seed: 69.53840160029144
+  _std_max_rew_per_seed_gt: 23.191814250088004
+  _std_max_rew_per_seed_gt_scaled: 0.9916086685193902
+  _std_max_rew_per_seed_scaled: 2.9732422430716032
+  best_mean_reward: -179.46503898199117
+  best_mean_reward_gt: -196.75017914030272
+  best_mean_reward_gt_scaled: -15.386210351647506
+  best_mean_reward_scaled: -14.034481963924717
+  std_best_reward: 76.43681373424018
+  std_best_reward_gt: 56.887366453824235
+  std_best_reward_gt_scaled: 4.448692196542458
+  std_best_reward_scaled: 5.977493387114325
 groundtruth_PPO:
   _gap: 0.0
   _max_rew_per_seed: 23.388071309135096

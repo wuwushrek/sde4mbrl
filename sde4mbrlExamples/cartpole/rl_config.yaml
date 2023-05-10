@@ -43,6 +43,8 @@ model_names:
   - cartpole_bb_random_sde_PPO
   - cartpole_bb_learned_sde_PPO
   - cartpole_bb_learned_si_sde_PPO
+  - gaussian_mlp_ensemble_cartpole_random_PPO
+  - gaussian_mlp_ensemble_cartpole_learned_PPO
 recompute_all: False
 # outfile: 'rewards_data.pkl'
 outfile: 'rewards_data_v2.pkl'
@@ -79,119 +81,60 @@ global_legend: True
 general_style:
   linewidth: 2.0
 
-# curve_plot_style:
-#   cartpole_bb_random_sde_PPO_gt:
-#     # label: "PPO tested on environment"
-#     # color: "#ff7f0e"
-#     color: "#d62728"
-#     color_std: "#d62728"
-#     zorder: 20
-#   cartpole_bb_random_sde_PPO:
-#     label: "Policy trained with learned SDE"
-#     color: "#2ca02c"
-#     color_std: "#2ca02c"
-#     linestyle: '--'
-#     zorder: 10
-#   cartpole_bb_learned_sde_PPO_gt:
-#     label: "Policy tested in environment"
-#     color: "#d62728"
-#     color_std: "#d62728"
-#     zorder: 20
-#   cartpole_bb_learned_sde_PPO:
-#     label: "Policy trained with learned PE"
-#     color: "#9467bd"
-#     color_std: "#9467bd"
-#     linestyle: '--'
-#     zorder: 10
-#   # groundtruth_PPO_gt:
-#   #   label: "Rew. on Groundtruth"
-#   #   color: "#E69F00"
-#   #   color_std: "#56B4E9"
-#   #   zorder: 30
-#   groundtruth_PPO:
-#     label: "MF PPO"
-#     color: "#1f77b4"
-#     color_std: "#1f77b4"
-#     linestyle: '--'
-#     zorder: 20
-#   # groundtruth_PPO_max:
-#   #   label: "Best agent groundtruth"
-#   #   color: "black"
-#   #   zorder: 30
-#   groundtruth_PPO_data:
-#     label: "MF PPO with $100$ trajectories"
-#     color: "#8c564b"
-#     linestyle: '-.'
-#     linewidth: 3
-#     zorder: 5
-
-# # The list of models to plot in the configuration (usually a grid) they need to be plotted
-# fig_args:
-#   figsize: [18, 5]
-#   nrows: 1
-#   ncols: 3
-#   sharex: True
-#   sharey: True
-#   # constrained_layout: True
-
-# extra_args:
-#   legend_args:
-#     loc: 'upper center'
-#     bbox_to_anchor: [0.5, 1.0]
-#     ncol: 3
-
-# std_style: std # minmax std perc
-# alpha_std: 0.5
-
-# # Groundtruth names for plotting max reward and reward at equivalent number of data
-# best_rew_gt: [groundtruth_PPO, ]
-# total_env_interact_for_training_data: 20000
-
-# plot_configs:
-#   - value: ['groundtruth_PPO',]
-#   - value: ['cartpole_bb_learned_sde_PPO', 'cartpole_bb_learned_sde_PPO_gt']
-#     yaxis: False
-#   - value: ['cartpole_bb_random_sde_PPO', 'cartpole_bb_random_sde_PPO_gt']
-#     yaxis: False
-
-# # save_config:
-# #   fname: 'density_traj_vs_gradCost.png'
-# #   dpi: 500
-
-######################################################################################
-##################################### Gap plot #######################################
-
 curve_plot_style:
-  cartpole_bb_learned_si_sde_PPO_gt:
-    label: "With side information"
-    color: "#1f77b4"
-    color_std: "#1f77b4"
-    zorder: 20
-  cartpole_bb_learned_si_sde_PPO:
-    # label: "W"
-    color: "#1f77b4"
-    color_std: "#1f77b4"
-    # linestyle: '--'
-    zorder: 20
-  cartpole_bb_learned_sde_PPO_gt:
-    label: "Without side information"
+  cartpole_bb_random_sde_PPO_gt:
+    # label: "PPO tested on environment"
+    # color: "#ff7f0e"
     color: "#d62728"
     color_std: "#d62728"
+    zorder: 20
+  cartpole_bb_random_sde_PPO:
+    label: "Policy trained with learned SDE"
+    color: "#2ca02c"
+    color_std: "#2ca02c"
     linestyle: '--'
     zorder: 10
-  cartpole_bb_learned_sde_PPO:
+  gaussian_mlp_ensemble_cartpole_learned_PPO_gt:
+    label: "Policy tested in environment"
     color: "#d62728"
     color_std: "#d62728"
+    zorder: 20
+  gaussian_mlp_ensemble_cartpole_learned_PPO:
+    label: "Policy trained with learned PE"
+    color: "#9467bd"
+    color_std: "#9467bd"
     linestyle: '--'
     zorder: 10
-
+  # groundtruth_PPO_gt:
+  #   label: "Rew. on Groundtruth"
+  #   color: "#E69F00"
+  #   color_std: "#56B4E9"
+  #   zorder: 30
+  groundtruth_PPO:
+    label: "MF PPO"
+    color: "#1f77b4"
+    color_std: "#1f77b4"
+    linestyle: '--'
+    zorder: 20
+  # groundtruth_PPO_max:
+  #   label: "Best agent groundtruth"
+  #   color: "black"
+  #   zorder: 30
+  groundtruth_PPO_data:
+    label: "MF PPO with $100$ trajectories"
+    color: "#8c564b"
+    linestyle: '-.'
+    linewidth: 3
+    zorder: 5
 
 # The list of models to plot in the configuration (usually a grid) they need to be plotted
 fig_args:
-  figsize: [12, 6]
-  nrows: 2
-  ncols: 1
+  figsize: [18, 5]
+  nrows: 1
+  ncols: 3
   sharex: True
+  sharey: True
+  # constrained_layout: True
 
 extra_args:
   legend_args:
@@ -200,14 +143,80 @@ extra_args:
     ncol: 3
 
 std_style: std # minmax std perc
-alpha_std: 0.3
+alpha_std: 0.5
 
 # Groundtruth names for plotting max reward and reward at equivalent number of data
-# best_rew_gt: [groundtruth_PPO, ]
-# total_env_interact_for_training_data: 20000
+best_rew_gt: [groundtruth_PPO, ]
+total_env_interact_for_training_data: 20000
 
 plot_configs:
-  - value: ['cartpole_bb_learned_si_sde_PPO_gt', 'cartpole_bb_learned_sde_PPO_gt']
-    xaxis: False
-  - value: ['cartpole_bb_learned_si_sde_PPO', 'cartpole_bb_learned_sde_PPO']
-    type: gap
+  - value: ['groundtruth_PPO',]
+  - value: ['gaussian_mlp_ensemble_cartpole_learned_PPO', 'gaussian_mlp_ensemble_cartpole_learned_PPO_gt']
+    yaxis: False
+  - value: ['cartpole_bb_random_sde_PPO', 'cartpole_bb_random_sde_PPO_gt']
+    yaxis: False
+
+save_config:
+  fname: 'MF_PPO_sdeVsGaussian.png'
+  dpi: 500
+
+######################################################################################
+##################################### Gap plot #######################################
+
+# global_legend: null
+
+# curve_plot_style:
+#   cartpole_bb_learned_si_sde_PPO_gt:
+#     label: "With side information"
+#     color: "#1f77b4"
+#     color_std: "#1f77b4"
+#     zorder: 20
+#   cartpole_bb_learned_si_sde_PPO:
+#     color: "#1f77b4"
+#     color_std: "#1f77b4"
+#     zorder: 20
+#   cartpole_bb_learned_sde_PPO_gt:
+#     label: "Without side information"
+#     color: "#d62728"
+#     color_std: "#d62728"
+#     linestyle: '--'
+#     zorder: 10
+#   cartpole_bb_learned_sde_PPO:
+#     color: "#d62728"
+#     color_std: "#d62728"
+#     linestyle: '--'
+#     zorder: 10
+
+
+# # The list of models to plot in the configuration (usually a grid) they need to be plotted
+# fig_args:
+#   figsize: [12, 6]
+#   nrows: 2
+#   ncols: 1
+#   sharex: True
+
+# extra_args:
+#   legend_args:
+#     loc: 'upper center'
+#     bbox_to_anchor: [0.5, 1.0]
+#     ncol: 3
+
+# std_style: std # minmax std perc
+# alpha_std: 0.3
+
+# # Groundtruth names for plotting max reward and reward at equivalent number of data
+# # best_rew_gt: [groundtruth_PPO, ]
+# # total_env_interact_for_training_data: 20000
+
+# plot_configs:
+#   - value: ['cartpole_bb_learned_si_sde_PPO_gt', 'cartpole_bb_learned_sde_PPO_gt']
+#     xaxis: False
+#   - value: ['cartpole_bb_learned_si_sde_PPO', 'cartpole_bb_learned_sde_PPO']
+#     type: gap
+  
+# save_config:
+#   fname: 'gap_nosideinfo_vs_sideinfo.png'
+#   dpi: 500
+
+# # save_config_tex:
+# #   fname: 'gap_nosideinfo_vs_sideinfo.tex'

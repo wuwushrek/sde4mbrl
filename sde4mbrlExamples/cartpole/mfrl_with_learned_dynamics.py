@@ -552,14 +552,14 @@ def plot_data(cfg_dict):
                 ax.set_ylabel(r'Cartpole total reward ($\times 10^2$)')
                 ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:.0f}".format(x/100)))
 
-        if not cfg_dict.get('global_legend', True):
+        if cfg_dict.get('global_legend', None) == False:
             ax.legend()
 
         ax.grid(True)
     
 
     # Collect all the labels and show them in the legend
-    if  cfg_dict.get('global_legend', True):
+    if  cfg_dict.get('global_legend', None) == True:
         fig.legend(**cfg_dict.get('extra_args',{}).get('legend_args', {}))
 
     # Save the figure
@@ -567,6 +567,13 @@ def plot_data(cfg_dict):
         figure_out = data_dir + 'figures/'
         cfg_dict['save_config']['fname'] = figure_out + cfg_dict['save_config']['fname']
         fig.savefig(**cfg_dict['save_config'])
+    
+    if 'save_config_tex' in cfg_dict.keys():
+        import tikzplotlib
+        figure_out = data_dir + 'figures/'
+        cfg_dict['save_config_tex']['fname'] = figure_out + cfg_dict['save_config_tex']['fname']
+        tikzplotlib.clean_figure(fig)
+        tikzplotlib.save(cfg_dict['save_config_tex']['fname'], figure=fig)
 
     # Show the figure
     plt.show()

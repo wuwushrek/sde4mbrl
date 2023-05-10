@@ -53,6 +53,8 @@ fig_args:
 
 # Filename of the training dataset used for each model to plo
 train_data: 'learned.pkl'
+# vmin: 0
+# vmax: 0.2
 
 plot_configs:
   - value: 'cartpole_bb_learned_v5_si_sde.pkl'
@@ -60,5 +62,5 @@ plot_configs:
     title: 'Density on learned.pkl'
 
 save_config:
-  fname: 'density_traj_vs_gradCost.png'
+  fname: 'dad_cartpole.png'
   dpi: 500
