@@ -314,9 +314,11 @@ def plot_prediction_accuracy(cfg_path):
 
             if _i == len(axs)-1:
                 # For the last plot, plot the cumulative prediction error
+                pred_error = np.cumsum(pred_error, axis=1) / np.arange(1, pred_error.shape[1]+1)[None]
                 pred_error_mean = np.mean(pred_error, axis=0)
                 pred_error_std = np.std(pred_error, axis=0)
-                cum_pred_error = np.cumsum(pred_error_mean) / np.arange(1, pred_error_mean.shape[0]+1)
+                # cum_pred_error = np.cumsum(pred_error_mean) / np.arange(1, pred_error_mean.shape[0]+1)
+                cum_pred_error = pred_error_mean
                 ax.plot(time_steps, cum_pred_error, 
                             **{**general_style, **mean_style,
                                 'label' : curve_plot_style[model_name]['label'] if _i == 0 else None

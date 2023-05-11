@@ -28,7 +28,7 @@ def train_density_model(model_dir, density_cfg):
                 modified_params['sde_loss']['density_loss']['ball_radius'] = brad
                 modified_params['sde_loss']['density_loss']['mu_coeff'] = mucoeff
                 model_name = f"nesde_Grad{gval}_Rad{brad}_Mu{mucoeff}"
-                train_models_on_dataset(model_dir, model_name, 'DensityExp', modified_params=modified_params)
+                train_models_on_dataset(model_dir, model_name, density_cfg['trajId'], modified_params=modified_params)
 
 
 def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
@@ -57,7 +57,8 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
     rng_key = jax.random.PRNGKey(density_cfg['seed_mesh'])
 
     # Extract all files in the directory containing DensityExp in learned_dir and edning with _sde.pkl
-    files = [f for f in os.listdir(learned_dir) if 'DensityExp' in f and f.endswith('_sde.pkl')]
+    # files = [f for f in os.listdir(learned_dir) if 'DensityExp' in f and f.endswith('_sde.pkl')]
+    files = [f for f in os.listdir(learned_dir) if f.endswith('_sde.pkl')]
 
     # Extract files2plot which provide a template in form of GradXX_RadXX_MuXX__DensityExp_XX
     files2plot = density_cfg['files2plot']
@@ -86,8 +87,10 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
 
     # Create the figure
     fig, axs_2d = plt.subplots(**fig_specs)
-    # Flatten the axes
-    axs = axs_2d.flatten()
+    if hasattr(axs_2d, 'shape'):
+        axs = axs_2d.flatten()
+    else:
+        axs = [axs_2d]
 
     # Loop over the files
     itr_count = 0
@@ -121,7 +124,9 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
         
         # Scale the mesh between 0 and 1 if we are using the density network directly instead of a sigmoid of the density network
         if net:
+            print(np.min(_mesh_pred_density), np.max(_mesh_pred_density))
             _mesh_pred_density = (_mesh_pred_density - np.min(_mesh_pred_density)) / (np.max(_mesh_pred_density) - np.min(_mesh_pred_density))
+        # _mesh_pred_density = (_mesh_pred_density - np.min(_mesh_pred_density)) / (np.max(_mesh_pred_density) - np.min(_mesh_pred_density))
 
         # Plot the mesh
         pcm = ax.pcolormesh(qgrid, qdotgrid, _mesh_pred_density, vmin=0, vmax=1,**density_cfg['mesh_args'])
@@ -167,8 +172,9 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
     _ = fig.colorbar(pcm, ax=axs, **density_cfg['colorbar_args'])
 
     # Save the figure
-    density_cfg['save_config']['fname'] = figure_out + density_cfg['save_config']['fname']
-    fig.savefig(**density_cfg['save_config'])
+    if 'save_config' in density_cfg:
+        density_cfg['save_config']['fname'] = figure_out + density_cfg['save_config']['fname']
+        fig.savefig(**density_cfg['save_config'])
 
     # Plot the figure
     plt.show()
@@ -184,7 +190,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Mass Spring Damper Model, Data Generator, and Trainer')
 
     # Add the arguments
-    parser.add_argument('--fun', type=str, default='gen_traj', help='The function to run')
+    parser.add_argument('--fun', type=str, default='plot', help='The function to run')
     parser.add_argument('--model_dir', type=str, default='mass_spring_damper.yaml', help='The model configuration and groundtruth file')
     parser.add_argument('--density_cfg', type=str, default='config_density_dataset.yaml', help='The data generation adn training configuration file')
     parser.add_argument('--learned_dir', type=str, default='', help='The directory where all the models are stored')

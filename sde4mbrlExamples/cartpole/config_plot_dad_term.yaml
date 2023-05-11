@@ -1,6 +1,7 @@
 ###################################################################################################################
 ####################################### Plotting and other configuration  #########################################
 ###################################################################################################################
+# JAX_PLATFORM_NAME=cpu python plot_dad_term.py --fun pred
 
 ############################# DAD term only #############################
 
@@ -155,72 +156,72 @@ save_config:
 #   fname: 'gap_nosideinfo_vs_sideinfo.tex'
 
 
-######################## Prediction uncertainty plot ############################
+# ######################## Prediction uncertainty plot ############################
 
-model2plot: [cartpole_bb_learned_sde, gaussian_mlp_ensemble_cartpole_learned]
+# model2plot: [cartpole_bb_learned_sde, gaussian_mlp_ensemble_cartpole_learned]
 
-curve_plot_style:
-  cartpole_bb_learned_sde:
-    title: SDE
-  gaussian_mlp_ensemble_cartpole_learned:
-    title: Probabilistic Ensemble
+# curve_plot_style:
+#   cartpole_bb_learned_sde:
+#     title: SDE
+#   gaussian_mlp_ensemble_cartpole_learned:
+#     title: Probabilistic Ensemble
 
-# Range used for the mesh plot
-thetarange: [-3.9, 3.9]
-thetadotrange: [-15, 15]
-# Number of grids on the axes
-num_grid_theta: 100
-num_grid_thetadot: 100
+# # Range used for the mesh plot
+# thetarange: [-3.9, 3.9]
+# thetadotrange: [-15, 15]
+# # Number of grids on the axes
+# num_grid_theta: 100
+# num_grid_thetadot: 100
 
-horizon_eval: 10
-num_particles_eval: 50
+# horizon_eval: 10
+# num_particles_eval: 50
 
-# Seed for operations related to the density estimation
-seed_mesh: 10
+# # Seed for operations related to the density estimation
+# seed_mesh: 10
 
-training_dataset_config:
-  label : 'Dataset'
-  color : 'lavender'
-  marker: 'x'
-  markersize : 8 
-  alpha : 1.0
-  linestyle : 'None'
-  zorder : 100
+# training_dataset_config:
+#   label : 'Dataset'
+#   color : 'lavender'
+#   marker: 'x'
+#   markersize : 8 
+#   alpha : 1.0
+#   linestyle : 'None'
+#   zorder : 100
 
-mesh_args:
-  cmap: viridis
-  shading: gouraud
+# mesh_args:
+#   cmap: viridis
+#   shading: gouraud
 
-colorbar_args:
-  shrink: 0.95
-  # extend: both
-  pad: 0.01
+# colorbar_args:
+#   shrink: 0.95
+#   # extend: both
+#   pad: 0.01
 
-extra_args:
-  title_right_args:
-    rotation: -90
-    size: large
-    labelpad: 15
+# extra_args:
+#   title_right_args:
+#     rotation: -90
+#     size: large
+#     labelpad: 15
 
-# The list of models to plot in the configuration (usually a grid) they need to be plotted
-fig_args:
-  figsize: [14, 6]
-  nrows: 1
-  ncols: 2
-  sharex: True
-  sharey: True
-  constrained_layout: True
+# # The list of models to plot in the configuration (usually a grid) they need to be plotted
+# fig_args:
+#   figsize: [14, 6]
+#   nrows: 1
+#   ncols: 2
+#   sharex: True
+#   sharey: True
+#   constrained_layout: True
 
-# # Normalize mesh
-# normalize_mesh: True
+# # # Normalize mesh
+# # normalize_mesh: True
 
-# Filename of the training dataset used for each model to plo
-train_data: 'learned.pkl'
+# # Filename of the training dataset used for each model to plo
+# train_data: 'learned.pkl'
 
-# vmin: 0
-# vmax: 0.2
+# # vmin: 0
+# # vmax: 0.2
 
 
-save_config:
-  fname: 'uncertainty_PEvsSDE.png'
-  dpi: 500
+# save_config:
+#   fname: 'uncertainty_PEvsSDE.png'
+#   dpi: 500

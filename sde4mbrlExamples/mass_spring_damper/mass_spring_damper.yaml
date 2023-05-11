@@ -19,6 +19,7 @@ model:
   
   # A priori knowledge of the noise distribution over the given prior dynamics knowledge
   noise_prior_params: [0.001, 0.01]
+  # noise_prior_params: [0.0, 0.0]
 
 
   # The parameter specifies if control is enabled or not on the model
@@ -46,10 +47,10 @@ model:
       # hidden_layers: [4, 4]
     
     density_nn:
-      init_value: 0.01
+      init_value: 0.1
       activation_fn: swish
-      hidden_layers: [16, 16]
-      aggressiveness: 0.75
+      hidden_layers: [32, 32]
+      # aggressiveness: 0.75
 
 
   # Vector field unknown terms
@@ -86,18 +87,22 @@ sde_loss:
 
   # Number of particles when fitting the SDE -> If different to the default model num_particles
   num_particles: 1
-  num_particles_test: 40
+  num_particles_test: 20
 
   # This is the horizon of integration when computing the loss
   # It might get clipped to the horizon of each trajectory in the dataset if it's greater than trajectory length
   horizon: 50
 
   # Randomly subsample the horizon to fit only num_sample2consider if given
-  num_sample2consider: 15
+  num_sample2consider: 10
 
   # Density loss parameters
   density_loss:
-    learn_mucoeff: False # Should we learn the local strong convexity parameters?
+    learn_mucoeff:
+      type: dnn
+      init_value: 0.01
+      activation_fn: tanh
+      hidden_layers: [8, 8]
     mu_coeff: 10.0 # STrong convexity parameter
     ball_radius: 0.05 # THe radius of the ball to sample for enforcing local strong convexity
     ball_nsamples: 10 # Number of points to sample in the ball
@@ -111,11 +116,15 @@ sde_loss:
   # Penalty on the local strong convexity constraints
   pen_density_scvex: 1.0
 
-  # # Penalty on the strong convexity constant mu
-  # pen_mu_coeff: 0.01
-
   # Regularization penalty default value for all parameters
-  pen_weights: 0 #1.0e-6
+  pen_weights: 1.0e-6 #1.0e-6
+
+  # Penalty on the strong convexity constant mu
+  pen_mu_type: lin_inv
+  pen_mu_coeff: 100.0
+
+  # Scaling down the dad term importance relative to data
+  pen_scvex_mult: 0.01
 
 
   #########################################################################
@@ -123,6 +132,9 @@ sde_loss:
   #########################################################################
 
   default_weights: 1.0
+  special_parameters_pen: # Dev iation from initial guess in init_params
+    scaler: 0
+    density: 0
 
   # # When penalizing NN parameters, we want these parameters to deviate minimally from the values below
   # # The name must be a substring of the parameters defined in the model   
@@ -133,24 +145,16 @@ sde_loss:
   # # Non specified parameters are set to
   # default_parameters_val: 0.0
 
-  # # Nominal parameters should be dictionary of pre-learned parameters, if available, froma  previous training
-  # special_parameters_pen:
-  #   # Fres: 1.0
-  #   # scaler: 0.0
-  #   density: 1.0
-
-  # # Parameters that are known to be nonnegative
-  # noneg_params: []
-
 
 sde_optimizer:
   - name: scale_by_adam
   - name: linear_schedule
     scheduler: True
     params:
-      init_value: -0.01 # Initial learning rate (Negative value for minimization)
+      # init_value: -0.001 # Initial learning rate (Negative value for minimization)
+      init_value: -0.01
       end_value: -0.001
-      transition_steps: 10000 # Basically the maximum number of gradient steps 
+      transition_steps: 5000 # Basically the maximum number of gradient steps 
   # - name: adaptive_grad_clip
   #   params:
   #     clipping: 0.001
@@ -161,7 +165,7 @@ sde_training:
   train_batch: 512 # The mini batch size for the training dataset
   test_batch: 512 # The mini batch size for the training dataset
   nepochs: 100000 # The number of epochs (full pass over the training dataset)
-  patience: 1000 # The number of epochs after which to stop the learningif no improvement in solution
+  patience: 150 # The number of epochs after which to stop the learningif no improvement in solution
   test_freq: 50 # Number of gradient steps after which to evaluate and display losses
   save_freq: 500 # Number of gradient steps after which to save the current losses+nn
   # epochs_before_checking_improv: 10
