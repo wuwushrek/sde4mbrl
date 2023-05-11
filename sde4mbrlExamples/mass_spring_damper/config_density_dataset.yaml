@@ -5,6 +5,7 @@
 # XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python density_script.py --fun train
 # JAX_PLATFORM_NAME=cpu python density_script.py --fun plot --learned_dir my_models/ --data_dir my_data/
 
+
 ###################################################################################################################
 ######################### These are the configurations when generating the dataset  ###############################
 ###################################################################################################################
@@ -157,8 +158,8 @@ density_trainer:
 ###################################################################################################################
 
 # Range used for the mesh plot
-qrange: [-0.5, 0.5]
-qdotrange: [-0.5, 0.5]
+qrange: [-0.2, 0.2]
+qdotrange: [-0.2, 0.2]
 # Number of grids on the axes
 num_grid_q: 100
 num_grid_qdot: 100
@@ -168,14 +169,24 @@ num_particles_diffusion: 1 # If the observation to state is nondeterministic, th
 # Seed for operations related to the density estimation
 seed_mesh: 10
 
+# Config for pdf file
 training_dataset_config:
   label : 'Dataset'
-  color : 'lavender'
+  color : 'white'
   marker: 'x'
-  markersize : 8 
+  markersize : 1
   alpha : 1.0
   linestyle : 'None'
   zorder : 100
+
+# training_dataset_config:
+#   label : 'Dataset'
+#   color : 'lavender'
+#   marker: 'x'
+#   markersize : 6
+#   alpha : 1.0
+#   linestyle : 'None'
+#   zorder : 100
 
 mesh_args:
   cmap: viridis
@@ -191,6 +202,176 @@ extra_args:
     rotation: -90
     size: large
     labelpad: 15
+  # legend_args:
+  #   markerscale: 2
+  #   fancybox: False
+  #   frameon: False
+  #   handletextpad: -0.5
+  #   loc: upper center
+  #   bbox_to_anchor: [0.2, 1.1]
+
+
+## Latex configuration parameters to generate plots that would fit the paper style
+# # To find fontsize of document
+# \makeatletter
+# \texttt{\f@size pt}
+# \makeatother
+
+# # \the\textwidth to find paperwidth pdf
+texConfig:
+  text.usetex : True
+  font.family: serif
+  pgf.rcfonts: False
+  pgf.texsystem: pdflatex
+  font.size: 10.95 
+  axes.labelsize: 9
+  # Make the legend / label fonts a little smaller
+  xtick.labelsize: 7
+  ytick.labelsize: 7
+  legend.fontsize: 9
+  axes.titlesize: 9
+  text.latex.preamble: ['\usepackage{amsmath}',]
+    # font.serif: ["times", "times new roman"]
+    # font.size: 10
+    # axes.labelsize: 10
+    # legend.fontsize: 10
+    # xtick.labelsize: 9
+    # ytick.labelsize: 9
+    
+paper_width_pt: 433.62
+use_pgf: False
+use_pdf: True
+##################################################################################################
+
+
+# #################################################################################
+# ###### First plot is the dad term with learning mu on the different dataset #####
+# fraction: 1.2
+
+# qrange: [-0.2, 0.2]
+# qdotrange: [-0.2, 0.2]
+# # Number of grids on the axes
+# num_grid_q: 100
+# num_grid_qdot: 100
+
+# extra_args:
+#   title_right_args:
+#     rotation: -90
+#     size: large
+#     labelpad: 15
+#   legend_args:
+#     markerscale: 3
+#     fancybox: False
+#     frameon: False
+#     handletextpad: -0.5
+#     loc: upper center
+#     bbox_to_anchor: [0.2, 1.0]
+
+# fig_args:
+#   figsize: [16, 4]
+#   nrows: 1
+#   ncols: 3
+#   sharex: True
+#   sharey: True
+
+# files2plot: 'Grad1_Rad0.05_Mu9__DensityExp_XX'
+
+# plot_configs:
+#   - value: ['3',]
+#   - value: ['6',]
+#   - value: ['25',]
+
+# save_config:
+#   fname: 'DadTermOnFewDataSet.png'
+#   dpi: 500
+
+
+# #################################################################################
+# ###### We evaluate the effect of having the gradient constraint for fixed mu foxed 0.05 rad #####
+# fraction: 0.6 # Half the full column size
+
+# qrange: [-0.25, 0.25]
+# qdotrange: [-0.25, 0.25]
+# # Number of grids on the axes
+# num_grid_q: 100
+# num_grid_qdot: 100
+
+# extra_args:
+#   title_right_args:
+#     rotation: -90
+#     size: large
+#     labelpad: 15
+#   legend_args:
+#     markerscale: 3
+#     fancybox: False
+#     frameon: False
+#     handletextpad: -0.5
+#     loc: upper center
+#     bbox_to_anchor: [0.2, 1.05]
+#     fontsize: 8
+
+# fig_args:
+#   figsize: [16, 4]
+#   nrows: 1
+#   ncols: 2
+#   sharex: True
+#   sharey: True
+
+# files2plot: 'GradXX_Rad0.05_Mu10__DensityExp_6'
+
+# plot_configs:
+#   - value: ['0',]
+#     title: 'Without gradient'
+#   - value: ['1',]
+#     title: 'With gradient'
+
+# save_config:
+#   fname: 'DadTermGradientIllusrtation.png'
+#   dpi: 500
+
+
+#################################################################################
+###### We evaluate the effect of the ball radius for fixed mu and grad pen=1 #####
+fraction: 0.6 # Half the full column size
+
+qrange: [-0.25, 0.25]
+qdotrange: [-0.25, 0.25]
+# Number of grids on the axes
+num_grid_q: 100
+num_grid_qdot: 100
+
+extra_args:
+  title_right_args:
+    rotation: -90
+    size: large
+    labelpad: 15
+  legend_args:
+    markerscale: 3
+    fancybox: False
+    frameon: False
+    handletextpad: -0.5
+    loc: upper center
+    bbox_to_anchor: [0.2, 1.05]
+    fontsize: 8
+
+fig_args:
+  figsize: [16, 4]
+  nrows: 1
+  ncols: 2
+  sharex: True
+  sharey: True
+
+files2plot: 'Grad1_RadXX_Mu10__DensityExp_25'
+
+plot_configs:
+  - value: ['0.05',]
+    title: '$B_{\textrm{rad}} = 0.05$'
+  - value: ['0.1',]
+    title: '$B_{\textrm{rad}} = 0.1$'
+
+save_config:
+  fname: 'DadTermBallRadIllusrtation.png'
+  dpi: 500
 
 ################# Good ones ###################
 # # The list of models to plot in the configuration (usually a grid) they need to be plotted
@@ -362,28 +543,28 @@ extra_args:
 #   fname: 'density_traj_vs_ballRad_mu1.png'
 #   dpi: 500
 
-# The list of models to plot in the configuration (usually a grid) they need to be plotted
-fig_args:
-  figsize: [8, 8]
-  nrows: 1
-  ncols: 1
-  sharex: True
-  sharey: True
-  constrained_layout: True
+# # The list of models to plot in the configuration (usually a grid) they need to be plotted
+# fig_args:
+#   figsize: [8, 8]
+#   nrows: 1
+#   ncols: 1
+#   sharex: True
+#   sharey: True
+#   constrained_layout: True
+# # # mesh_specs:
+# # files2plot: 'Grad1_RadXX_Mu9__DensityExp_XX' # XX will be replaced by the values in plotconfig
+# # plot_configs:
+# #   - value: ['0.05','6']
+# #     title: '$N_{traj} = 25$'
+
+# # save_config:
+# #   fname: 'density_traj_vs_ballRad_mu1.png'
+# #   dpi: 500
+
 # # mesh_specs:
-# files2plot: 'Grad1_RadXX_Mu9__DensityExp_XX' # XX will be replaced by the values in plotconfig
+# files2plot: 'nesde_bboxes__MSD_MeasHigh_FullSpace_XX' # XX will be replaced by the values in plotconfig
 # plot_configs:
-#   - value: ['0.05','6']
+#   - value: ['5']
 #     title: '$N_{traj} = 25$'
-
-# save_config:
-#   fname: 'density_traj_vs_ballRad_mu1.png'
-#   dpi: 500
-
-# mesh_specs:
-files2plot: 'nesde_bboxes__MSD_MeasHigh_FullSpace_XX' # XX will be replaced by the values in plotconfig
-plot_configs:
-  - value: ['5']
-    title: '$N_{traj} = 25$'
 
 # nesde_bboxes__MSD_MeasHigh_FullSpace_5_sde.pkl

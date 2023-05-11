@@ -3,7 +3,8 @@
 import os
 import jax
 import numpy as np
-import matplotlib.pyplot as plt
+
+import matplotlib as mpl
 
 
 from mass_spring_model import gen_traj_yaml, train_models_on_dataset, load_learned_diffusion, _load_pkl
@@ -12,6 +13,25 @@ from sde4mbrl.utils import load_yaml
 from tqdm.auto import tqdm
 
 MODEL_NAME = "nesde"
+
+def get_size_paper(width_pt, fraction=1, subplots=(1,1)):
+    """ Get the size of the figure in inches
+        width_pt: Width of the figure in latex points
+        fraction: Fraction of the width which you wish the figure to occupy
+        subplots: The number of rows and columns
+    """
+    # Width of the figure in inches
+    fig_width_pt = width_pt * fraction
+    # Convert from pt to inches
+    inches_per_pt = 1 / 72.27
+    # Golden ratio to set aesthetic figure height
+    golden_ratio = (5**.5 - 1) / 2
+    # Figure width in inches
+    fig_width_in = fig_width_pt * inches_per_pt
+    # Figure height in inches
+    fig_height_in = fig_width_in * golden_ratio * (subplots[0] / subplots[1])
+    return (fig_width_in, fig_height_in)
+
 
 def train_density_model(model_dir, density_cfg):
     """ Train the density model for different values of the parameters and different trajectories
@@ -74,6 +94,7 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
     files = [f for f in files if any([f2p.split('__')[1] in f for f2p in files2plot_full])]
     # Now, we need to remove files that do not contain GradXX_RadXX_MuXX in files2plot_full
     files = [f for f in files if any([f2p.split('DensityExp')[0] in f for f2p in files2plot_full])]
+    # print(files)
     # Make sure that the number of files is the same as the number of files2plot_full
     assert len(files) == len(files2plot_full), "The number of files to plot is not the same as the number of files2plot_full"
 
@@ -84,6 +105,26 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
 
     # Check if the number of subplots is the same as the number of files to plot
     assert nrows*ncols == len(files), "The number of subplots is not the same as the number of files to plot"
+
+    # Check if use_tex is enabled
+    use_pgf = density_cfg.get('use_pgf', False)
+    use_pdf = density_cfg.get('use_pdf', False)
+    if use_pgf:
+        mpl.use("pgf")
+    
+    # Import the matplotlib.pyplot
+    import matplotlib.pyplot as plt
+
+    # Modify the figure size if use_pgf is enabled or use_pdf is enabled
+    if use_pgf or use_pdf:
+        paper_width_pt = density_cfg['paper_width_pt']
+        fraction = density_cfg['fraction']
+        # Get the size of the figure in inches
+        fig_size = get_size_paper(paper_width_pt, fraction=fraction, subplots=(nrows, ncols))
+        # Set the figure size
+        fig_specs['figsize'] = fig_size
+        # Set the rcParams
+        plt.rcParams.update(density_cfg['texConfig'])
 
     # Create the figure
     fig, axs_2d = plt.subplots(**fig_specs)
@@ -133,7 +174,7 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
 
         # Set the title if 'title' is in pconf
         if 'title' in pconf:
-            ax.set_title(pconf['title'])
+            ax.set_title(r"{}".format(pconf['title']))
         
         # Set the x axis label
         # Add xlabel only to the bottom row
@@ -174,12 +215,25 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
     # Save the figure
     if 'save_config' in density_cfg:
         density_cfg['save_config']['fname'] = figure_out + density_cfg['save_config']['fname']
-        fig.savefig(**density_cfg['save_config'])
+        if use_pgf:
+            # Replace the extension with pgf
+            output_name = density_cfg['save_config']['fname'].split('.')[:-1]
+            output_name = '.'.join(output_name) + '.pgf'
+            fig.savefig(output_name, format='pgf')
+        
+        if use_pdf:
+            # Replace the extension with pdf
+            output_name = density_cfg['save_config']['fname'].split('.')[:-1]
+            output_name = '.'.join(output_name) + '.pdf'
+            fig.savefig(output_name, format='pdf', bbox_inches='tight')
+
+        fig.savefig(**density_cfg['save_config'], bbox_inches='tight')
 
     # Plot the figure
+    if use_pgf:
+        return
+    
     plt.show()
-
-
 
 
 if __name__ == '__main__':
