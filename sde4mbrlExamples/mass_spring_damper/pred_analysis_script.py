@@ -4,8 +4,8 @@
 import os
 import jax
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
 
 from mass_spring_model import load_data_generator, load_learned_model, load_learned_diffusion, _load_pkl
 from sde4mbrl.utils import load_yaml
@@ -13,25 +13,31 @@ from mbrlLibUtils.save_and_load_models import load_learned_ensemble_model
 
 from tqdm.auto import tqdm
 
-texConfig = {
-    "text.usetex": True,
-    "font.family": "serif",
-    "font.serif": ["times", "times new roman"],
-    # "mathtext.fontset": "cm",
-    # 'text.latex.preamble': [r'\usepackage{newtxmath}'],
-    "font.size": 10,
-    "axes.labelsize": 10,
-    "legend.fontsize": 10,
-    "xtick.labelsize": 9,
-    "ytick.labelsize": 9
-}
-
 type2label = {
   "t2q": "$q$",
   "t2qdot": "$\dot{q}$",
   "q2qdot": ["$q$", "$\dot{q}$"],
   "t2Err": "Prediction Error"
 }
+
+
+def get_size_paper(width_pt, fraction=1, subplots=(1,1)):
+    """ Get the size of the figure in inches
+        width_pt: Width of the figure in latex points
+        fraction: Fraction of the width which you wish the figure to occupy
+        subplots: The number of rows and columns
+    """
+    # Width of the figure in inches
+    fig_width_pt = width_pt * fraction
+    # Convert from pt to inches
+    inches_per_pt = 1 / 72.27
+    # Golden ratio to set aesthetic figure height
+    golden_ratio = (5**.5 - 1) / 2
+    # Figure width in inches
+    fig_width_in = fig_width_pt * inches_per_pt
+    # Figure height in inches
+    fig_height_in = fig_width_in * golden_ratio * (subplots[0] / subplots[1])
+    return (fig_width_in, fig_height_in)
 
 def create_density_mesh_plots(cfg_path, learned_dir, data_dir):
     """ Create the mesh plots for the density model
@@ -85,12 +91,37 @@ def create_density_mesh_plots(cfg_path, learned_dir, data_dir):
     # Check if the number of subplots is the same as the number of files to plot
     assert nrows*ncols >= len(files), "The number of subplots is not the same as the number of files to plot"
 
+    # Check if use_tex is enabled
+    use_pgf = density_cfg.get('use_pgf', False)
+    use_pdf = density_cfg.get('use_pdf', False)
+    if use_pgf:
+        mpl.use("pgf")
+    
+    # Modify the figure size if use_pgf is enabled or use_pdf is enabled
+    if use_pgf or use_pdf:
+        paper_width_pt = density_cfg['paper_width_pt']
+        fraction = density_cfg['fraction']
+        # Get the size of the figure in inches
+        fig_size = get_size_paper(paper_width_pt, fraction=fraction, subplots=(nrows, ncols))
+        # Set the figure size
+        fig_specs['figsize'] = fig_size
+        # Set the rcParams
+        plt.rcParams.update(density_cfg['texConfig'])
+
     # Create the figure
     fig, axs_2d = plt.subplots(**fig_specs)
     if hasattr(axs_2d, 'shape'):
         axs = axs_2d.flatten()
     else:
         axs = [axs_2d]
+    
+    # Check if diffusion is enabled or model std is enabled
+    compute_density = density_cfg.get('compute_density', True)
+
+    if not compute_density:
+        # Extra parameters for prediction and groundtruth
+        num_particles = density_cfg['num_particles_std']
+        horizon_uncertainty = density_cfg['horizon_uncertainty']
 
     # Loop over the files
     itr_count = 0
@@ -111,8 +142,17 @@ def create_density_mesh_plots(cfg_path, learned_dir, data_dir):
         # Create the samples from training dataset
         # This is a 2D array containing all the transitions
         train_data = np.array([ xev for (xev, _) in train_data])
+    
         # Load the model
-        _diff_est_fn = load_learned_diffusion(learned_dir+model_name, num_samples=density_cfg['num_particles_diffusion'])
+        if compute_density:
+            __diff_est_fn = load_learned_diffusion(learned_dir+model_name, num_samples=density_cfg['num_particles_diffusion'])
+            _diff_est_fn = lambda _x, _key, net: __diff_est_fn(_x, _key, net=net)[1] # Second output is the density
+        else:
+            __diff_est_fn,_ = load_learned_model(learned_dir+model_name, horizon=horizon_uncertainty, 
+                                                        num_samples=num_particles, 
+                                                        ufun=None, prior_dist=False)
+            _diff_est_fn = lambda _x, _key, net: np.sum(np.std(__diff_est_fn(_x, _key), axis=0))
+        
         # Iterate over the meshgrid and compute the prediction error and std
         _mesh_pred_density = np.zeros((len(qdotgrid), len(qgrid)))
         # Check if the diffusion should becomputed using the actual density network or sigmoid
@@ -123,15 +163,15 @@ def create_density_mesh_plots(cfg_path, learned_dir, data_dir):
                 rng_key, density_key = jax.random.split(rng_key)
                 xcurr = np.array([qgrid[_j,_i], qdotgrid[_j, _i]])
                 # Compute the density
-                _mesh_pred_density[_j,_i] = float(_diff_est_fn(xcurr, density_key, net=net_val)[1]) # Second output is the density
+                _mesh_pred_density[_j,_i] = float(_diff_est_fn(xcurr, density_key, net_val)) # Second output is the density
         
         # Scale the mesh between 0 and 1 if we are using the density network directly instead of a sigmoid of the density network
         if net_val:
             _mesh_pred_density = (_mesh_pred_density - np.min(_mesh_pred_density)) / (np.max(_mesh_pred_density) - np.min(_mesh_pred_density))
 
         # Plot the mesh
-        vmin = density_cfg.get('vmin', pconf.get('vmin', 0))
-        vmax = density_cfg.get('vmax', pconf.get('vmax', 1))
+        vmin = density_cfg.get('vmin', pconf.get('vmin', None))
+        vmax = density_cfg.get('vmax', pconf.get('vmax', None))
         pcm = ax.pcolormesh(qgrid, qdotgrid, _mesh_pred_density, vmin=vmin, vmax=vmax, **density_cfg['mesh_args'])
 
         # Set the title if 'title' is in pconf
@@ -168,11 +208,30 @@ def create_density_mesh_plots(cfg_path, learned_dir, data_dir):
     _ = fig.colorbar(pcm, ax=axs, **density_cfg['colorbar_args'])
 
     # Save the figure
-    density_cfg['save_config']['fname'] = figure_out + density_cfg['save_config']['fname']
-    fig.savefig(**density_cfg['save_config'])
+    if 'save_config' in density_cfg:
+        density_cfg['save_config']['fname'] = figure_out + density_cfg['save_config']['fname']
+        if use_pgf:
+            # Replace the extension with pgf
+            output_name = density_cfg['save_config']['fname'].split('.')[:-1]
+            output_name = '.'.join(output_name) + '.pgf'
+            fig.savefig(output_name, format='pgf')
+        
+        if use_pdf:
+            # Replace the extension with pdf
+            output_name = density_cfg['save_config']['fname'].split('.')[:-1]
+            output_name = '.'.join(output_name) + '.pdf'
+            fig.savefig(output_name, format='pdf', bbox_inches='tight')
+
+        fig.savefig(**density_cfg['save_config'], bbox_inches='tight')
 
     # Plot the figure
+    if use_pgf:
+        return
+    
+    # Plot the figure
     plt.show()
+
+
 
 def find_dictkey_contained_in_str(_dict, _str):
     """ Find the key in _dict that is contained in _str
@@ -253,6 +312,23 @@ def create_uncertainty_plots(cfg_path, learned_dir, data_dir, gt_dir):
 
     # Check if the number of subplots is the same as the number of files to plot
     assert ncols >= len(files), "The number of subplots is not the same as the number of files to plot"
+
+    # Check if use_tex is enabled
+    use_pgf = density_cfg.get('use_pgf', False)
+    use_pdf = density_cfg.get('use_pdf', False)
+    if use_pgf:
+        mpl.use("pgf")
+    
+    # Modify the figure size if use_pgf is enabled or use_pdf is enabled
+    if use_pgf or use_pdf:
+        paper_width_pt = density_cfg['paper_width_pt']
+        fraction = density_cfg['fraction']
+        # Get the size of the figure in inches
+        fig_size = get_size_paper(paper_width_pt, fraction=fraction, subplots=(nrows, ncols))
+        # Set the figure size
+        fig_specs['figsize'] = fig_size
+        # Set the rcParams
+        plt.rcParams.update(density_cfg['texConfig'])
 
     # Create the figure
     fig, axs_2d = plt.subplots(**fig_specs)
@@ -357,11 +433,12 @@ def create_uncertainty_plots(cfg_path, learned_dir, data_dir, gt_dir):
         if itr_count % ncols == 0:
             ax.set_ylabel(r'$\dot{q}$')
         axs[itr_count+ncols].set_xlabel('$q$')
+        axs[ncols].set_ylabel(r'$\dot{q}$')
         
         # Now let's add the color bar if this is the last subplot of the first row
         if itr_count == ncols-1:
             cbar = fig.colorbar(pcm, ax=axs[:ncols], **density_cfg['colorbar_args'])
-            cbar.ax.set_ylabel('Prediction Error', **density_cfg.get('extra_args',{}).get('label_colorbar_args', {}))
+            cbar.ax.set_ylabel('Err. prediction', **density_cfg.get('extra_args',{}).get('label_colorbar_args', {}))
 
         # Let's take care of the second row
         _std_result = _mesh_std_evol[itr_count]
@@ -369,7 +446,10 @@ def create_uncertainty_plots(cfg_path, learned_dir, data_dir, gt_dir):
         # Translate the standard deviation between 0 and 1
         # Normalize the mesh
         if density_cfg.get('normalize_mesh', False):
-            _std_result = (_std_result - np.min(_std_result)) / (np.max(_std_result) - np.min(_std_result))
+            if 'node' in pconf['value'][0]:
+                _std_result = np.zeros_like(_std_result)
+            else:
+                _std_result = (_std_result - np.min(_std_result)) / (np.max(_std_result) - np.min(_std_result))
             # _mesh_pred_density = (_mesh_pred_density - np.min(_mesh_pred_density)) / (np.max(_mesh_pred_density) - np.min(_mesh_pred_density))
 
         # Plot the mesh
@@ -382,7 +462,7 @@ def create_uncertainty_plots(cfg_path, learned_dir, data_dir, gt_dir):
         # Now let's add the color bar if this is the last subplot of the first row
         if itr_count == ncols-1:
             cbar = fig.colorbar(pcm, ax=axs[ncols:], **density_cfg['colorbar_args'])
-            cbar.ax.set_ylabel('Normalized Uncertainty', **density_cfg.get('extra_args',{}).get('label_colorbar_args', {}))
+            cbar.ax.set_ylabel('Uncertainty', **density_cfg.get('extra_args',{}).get('label_colorbar_args', {}))
 
         # Now we plot the training data
         for _i, _traj_sample in enumerate(_sampling_datas[itr_count]):
@@ -400,9 +480,21 @@ def create_uncertainty_plots(cfg_path, learned_dir, data_dir, gt_dir):
     axs[0].legend(**density_cfg.get('extra_args',{}).get('legend_args', {}))
 
     # Save the figure
-    if 'save_config' in density_cfg.keys():
+    if 'save_config' in density_cfg:
         density_cfg['save_config']['fname'] = figure_out + density_cfg['save_config']['fname']
-        fig.savefig(**density_cfg['save_config'])
+        if use_pgf:
+            # Replace the extension with pgf
+            output_name = density_cfg['save_config']['fname'].split('.')[:-1]
+            output_name = '.'.join(output_name) + '.pgf'
+            fig.savefig(output_name, format='pgf')
+        
+        if use_pdf:
+            # Replace the extension with pdf
+            output_name = density_cfg['save_config']['fname'].split('.')[:-1]
+            output_name = '.'.join(output_name) + '.pdf'
+            fig.savefig(output_name, format='pdf', bbox_inches='tight')
+
+        fig.savefig(**density_cfg['save_config'], bbox_inches='tight')
 
     # Plot the figure
     plt.show()
@@ -658,9 +750,29 @@ def plot_prediction_accuracy(cfg_path, learned_dir, data_dir, gt_dir):
     
     # Exract the figure and axis specifications
     fig_specs = density_cfg['fig_args']
-    fig_specs['nrows'] = 1
-    fig_specs['ncols'] = 4
+    # fig_specs['nrows'] = 1
+    # fig_specs['ncols'] = 4
+    nrows = fig_specs['nrows']
+    ncols = fig_specs['ncols']
     # fig_specs['sharex'] = True
+    assert nrows * ncols == 4, "The number of subplots must be 4"
+
+    # Check if use_tex is enabled
+    use_pgf = density_cfg.get('use_pgf', False)
+    use_pdf = density_cfg.get('use_pdf', False)
+    if use_pgf:
+        mpl.use("pgf")
+    
+    # Modify the figure size if use_pgf is enabled or use_pdf is enabled
+    if use_pgf or use_pdf:
+        paper_width_pt = density_cfg['paper_width_pt']
+        fraction = density_cfg['fraction']
+        # Get the size of the figure in inches
+        fig_size = get_size_paper(paper_width_pt, fraction=fraction, subplots=(nrows, ncols))
+        # Set the figure size
+        fig_specs['figsize'] = fig_size
+        # Set the rcParams
+        plt.rcParams.update(density_cfg['texConfig'])
 
     # Create the figure
     fig, axs_2d = plt.subplots(**fig_specs)
@@ -692,6 +804,11 @@ def plot_prediction_accuracy(cfg_path, learned_dir, data_dir, gt_dir):
     train_data = _load_pkl(data_dir + _train_data_name + ".pkl")
     train_data = np.array([ xev for (xev, _) in train_data])
 
+    if 'data_spacing' in density_cfg:
+        _my_time = _my_time[::density_cfg['data_spacing']]
+        _gtruth_data = _gtruth_data[::density_cfg['data_spacing']]
+        train_data = train_data[:, ::density_cfg['data_spacing'], :]
+
     # Loop over the files
     first_model = True
     for model_name in model2plot:
@@ -721,11 +838,15 @@ def plot_prediction_accuracy(cfg_path, learned_dir, data_dir, gt_dir):
         # Extract the initial state for integration
         rng_key = jax.random.PRNGKey(density_cfg['seed_eval'])
         _xpred  = _pred_fn(xinit, rng_key)
+        # Space the data
+        if 'data_spacing' in density_cfg:
+            _xpred = _xpred[:, ::density_cfg['data_spacing'], :]
+
         x_pred_mean = np.mean(_xpred, axis=0)
         x_pred_std = np.std(_xpred, axis=0)
 
-        pred_error = np.linalg.norm(_xpred - _gtruth_data[None], axis=-1)
-        # pred_error = np.linalg.norm(np.mean(_xpred, axis=0) - _gtruth_data, axis=-1)[None]
+        # pred_error = np.linalg.norm(_xpred - _gtruth_data[None], axis=-1)
+        pred_error = np.linalg.norm(np.mean(_xpred, axis=0) - _gtruth_data, axis=-1)[None]
         cum_pred_error = np.cumsum(pred_error, axis=1) / np.arange(1, pred_error.shape[1]+1)[None]
         # cum_pred_error = np.cumsum(pred_error) / np.arange(1, pred_error.shape[0]+1)
 
@@ -758,12 +879,13 @@ def plot_prediction_accuracy(cfg_path, learned_dir, data_dir, gt_dir):
             
             if _i == len(axs)-2:
                 # Print the training dataset
-                for _j, _xev in enumerate(train_data):
-                    ax.plot(_xev[:,0], _xev[:,1], 
-                            **{**general_style, **curve_plot_style['dataset'], 
-                               'label' : None if _j > 0 or not first_model else curve_plot_style['dataset']['label']
-                               }
-                            )
+                if 'dataset' in curve_plot_style:
+                    for _j, _xev in enumerate(train_data):
+                        ax.plot(_xev[:,0], _xev[:,1], 
+                                **{**general_style, **curve_plot_style['dataset'], 
+                                'label' : None if _j > 0 or not first_model else curve_plot_style['dataset']['label']
+                                }
+                                )
                 # It's the x-y plot
                 # First plot the groundtruth
                 ax.plot(_gtruth_data[:,0], _gtruth_data[:,1],
@@ -796,12 +918,13 @@ def plot_prediction_accuracy(cfg_path, learned_dir, data_dir, gt_dir):
                 ax.set_ylim(density_cfg['ylim'][_i])
 
 
-            # Plot the groundtruth 
-            ax.plot(_my_time, _gtruth_data[:, _i], 
-                        **{**general_style, **curve_plot_style['groundtruth'], 
-                                'label' : curve_plot_style['groundtruth']['label'] if _i == 0 and first_model else None
-                            } 
-                    )
+            # Plot the groundtruth
+            if first_model:
+                ax.plot(_my_time, _gtruth_data[:, _i], 
+                            **{**general_style, **curve_plot_style['groundtruth'], 
+                                    'label' : curve_plot_style['groundtruth']['label'] if _i == 0 and first_model else None
+                                } 
+                        )
 
             # Plot the mean prediction accuracy
             if std_style is None:
@@ -818,6 +941,10 @@ def plot_prediction_accuracy(cfg_path, learned_dir, data_dir, gt_dir):
                                 } 
                         )
             
+            if 'node' in model_name:
+                first_model = False
+                continue
+
             # Plot the std depending on the std_style
             if std_style == 'std':
                 ax.fill_between(_my_time, x_pred_mean[:, _i] - x_pred_std[:, _i], 
@@ -842,11 +969,25 @@ def plot_prediction_accuracy(cfg_path, learned_dir, data_dir, gt_dir):
         fig.legend(**density_cfg.get('extra_args',{}).get('legend_args', {}))
 
     # Save the figure
-    if 'save_config' in density_cfg.keys():
+    if 'save_config' in density_cfg:
         density_cfg['save_config']['fname'] = figure_out + density_cfg['save_config']['fname']
-        fig.savefig(**density_cfg['save_config'])
+        if use_pgf:
+            # Replace the extension with pgf
+            output_name = density_cfg['save_config']['fname'].split('.')[:-1]
+            output_name = '.'.join(output_name) + '.pgf'
+            fig.savefig(output_name, format='pgf')
+        
+        if use_pdf:
+            # Replace the extension with pdf
+            output_name = density_cfg['save_config']['fname'].split('.')[:-1]
+            output_name = '.'.join(output_name) + '.pdf'
+            fig.savefig(output_name, format='pdf', bbox_inches='tight')
+
+        fig.savefig(**density_cfg['save_config'], bbox_inches='tight')
     
     if 'save_config_tex' in density_cfg.keys():
+        axs[0].legend(**density_cfg.get('extra_args',{}).get('legend_args', {}))
+        tikzplotlib_fix_ncols(fig)
         import tikzplotlib
         density_cfg['save_config_tex']['fname'] = figure_out + density_cfg['save_config_tex']['fname']
         tikzplotlib.clean_figure(fig)
@@ -854,11 +995,14 @@ def plot_prediction_accuracy(cfg_path, learned_dir, data_dir, gt_dir):
 
     plt.show()
 
-
-
-        
-
-
+def tikzplotlib_fix_ncols(obj):
+    """
+    workaround for matplotlib 3.6 renamed legend's _ncol to _ncols, which breaks tikzplotlib
+    """
+    if hasattr(obj, "_ncols"):
+        obj._ncol = obj._ncols
+    for child in obj.get_children():
+        tikzplotlib_fix_ncols(child)
 
 
 if __name__ == '__main__':
