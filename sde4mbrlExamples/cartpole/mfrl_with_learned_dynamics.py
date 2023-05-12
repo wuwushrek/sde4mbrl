@@ -572,14 +572,25 @@ def plot_data(cfg_dict):
         fig.savefig(**cfg_dict['save_config'])
     
     if 'save_config_tex' in cfg_dict.keys():
+        for ax in axs:
+            ax.legend()
+        tikzplotlib_fix_ncols(fig)
         import tikzplotlib
-        figure_out = data_dir + 'figures/'
         cfg_dict['save_config_tex']['fname'] = figure_out + cfg_dict['save_config_tex']['fname']
         tikzplotlib.clean_figure(fig)
         tikzplotlib.save(cfg_dict['save_config_tex']['fname'], figure=fig)
 
     # Show the figure
     plt.show()
+
+def tikzplotlib_fix_ncols(obj):
+    """
+    workaround for matplotlib 3.6 renamed legend's _ncol to _ncols, which breaks tikzplotlib
+    """
+    if hasattr(obj, "_ncols"):
+        obj._ncol = obj._ncols
+    for child in obj.get_children():
+        tikzplotlib_fix_ncols(child)
 
 if __name__ == '__main__':
     import argparse
