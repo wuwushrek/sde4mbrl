@@ -98,14 +98,14 @@ texConfig:
   pgf.rcfonts: False
   pgf.texsystem: pdflatex
   font.size: 10.95 
-  axes.labelsize: 9
+  axes.labelsize: 8
   # Make the legend / label fonts a little smaller
   xtick.labelsize: 7
   ytick.labelsize: 7
   legend.fontsize: 9
   # axes.titlesize: 8
   axes.titlesize: 9
-  text.latex.preamble: ['\usepackage{amsmath}',]
+  # text.latex.preamble: ['\usepackage{amsmath}',]
     # font.serif: ["times", "times new roman"]
     # font.size: 10
     # axes.labelsize: 10
@@ -189,162 +189,172 @@ use_pdf: True
 #   dpi: 500
 
 
-# ###########################################################################
-# ############### Plotting prediction error and uncertainty #################
+###########################################################################
+############### Plotting prediction error and uncertainty #################
 
-# # JAX_PLATFORM_NAME=cpu python pred_analysis_script.py --fun unc
+# JAX_PLATFORM_NAME=cpu python pred_analysis_script.py --fun unc
+
+fraction: 0.8
+
+# Format for learned models to plot XX__MSD_XX_XX_XX
+# For example nestde__MSD_MeasLow_TopRight_5 according to the name of the learned models
+files2plot: 'XX__MSD_MeasHigh_TopRight_5'
+# max_error: 0.2 # The maximum error to plot on the cbar
+gaussian_propagation_method: fixed_model
+device: cpu
+max_error: 0.3
+normalize_mesh: True
+
+num_grid_q: 50
+num_grid_qdot: 50
+num_particles_std: 200
+horizon_pred_accuracy: 15
+horizon_uncertainty: 5
+
+# The list of models to plot in the configuration (usually a grid) they need to be plotted
+fig_args:
+  # Number of rows is automatically 2 for these uncertainty plots
+  figsize: [14, 8]
+  ncols: 3
+  sharex: True
+  sharey: True
+  # constrained_layout: True
+
+colorbar_args:
+  shrink: 0.95
+  # extend: both
+  pad: 0.01
+
+extra_args:
+  title_right_args:
+    rotation: -90
+    size: large
+    labelpad: 12
+  legend_args:
+    markerscale: 3
+    fancybox: False
+    frameon: False
+    handletextpad: -0.5
+    loc: upper center
+    bbox_to_anchor: [0.25, 1.05]
+    labelcolor: 'white'
+
+plot_configs:
+  # - value: ['nesde','MeasLow','TopRight','5']
+  #   title: 'Low Meas Noise'
+  - value: ['node_bboxes',]
+    title: 'Neural ODE'
+  - value: ['gaussian_mlp_ensemble_hid_32_ens_5',]
+    title: 'Prob. Ensemble'
+    mean_type: median
+  - value: ['nesde_bboxes',]
+    title: 'Our Model'
+    # mean_type: median
+
+save_config:
+  # fname: 'Unc_MSD_MeasLow_TopRight_5.png'
+  fname: 'Unc_MSD_MeasHigh_TopRight_5_v2.png'
+  dpi: 500
+
+
+
+# ###########################################################################
+# ####### Plotting state evolution wrt neural ode and groundtruth ###########
+
+# # JAX_PLATFORM_NAME=cpu python pred_analysis_script.py --fun pred
+# use_pgf: False
+# use_pdf: False
 
 # fraction: 1.2
 
-# # Format for learned models to plot XX__MSD_XX_XX_XX
-# # For example nestde__MSD_MeasLow_TopRight_5 according to the name of the learned models
-# files2plot: 'XX__MSD_MeasLow_TopRight_5'
-# # max_error: 0.2 # The maximum error to plot on the cbar
-# gaussian_propagation_method: fixed_model
-# device: cpu
-# max_error: 0.2
-# normalize_mesh: True
+# # Evaluation dataset
+# train_data_name: MSD_MeasHigh_FullSpace_10
+# horizon_eval: 800 # Horizon of integration for prediction comparison
+# num_particles_eval: 50 # Number of particles for uncertainty
+# init_config: [0.15, -0.15]
+# data_spacing: 15
 
-# # The list of models to plot in the configuration (usually a grid) they need to be plotted
-# fig_args:
-#   # Number of rows is automatically 2 for these uncertainty plots
-#   figsize: [14, 8]
-#   ncols: 3
-#   sharex: True
-#   sharey: True
+# # The models to show on the plot
+# model2plot: [nesde_bboxes, node_bboxes] # , node_bboxes]
+# seed_eval: 15 # The seed for the probabilistic models: sde or jax
+# # The percentiles used when plotting the sde distribution
+# # alpha_percentiles: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]
+# # percentiles_array: [0.999, 0.99, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.25]
 
-# colorbar_args:
-#   shrink: 0.95
-#   # extend: both
-#   pad: 0.01
+# # alpha_percentiles: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]
+# # percentiles_array: [0.75, 0.70, 0.65, 0.6, 0.55, 0.53, 0.5, 0.4, 0.3, 0.25]
+
+# # alpha_percentiles: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55]
+# alpha_percentiles: [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60]
+# percentiles_array: [0.999, 0.99, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
+
+# # Which style to use for standardt deviation
+# # std_style: perc75 # std or minmax or perc (for percentiles)
+# alpha_std: 0.3
 
 # extra_args:
-#   title_right_args:
-#     rotation: -90
-#     size: large
-#     labelpad: 12
 #   legend_args:
-#     markerscale: 3
-#     fancybox: False
-#     frameon: False
-#     handletextpad: -0.5
-#     loc: upper center
-#     bbox_to_anchor: [0.2, 1.0]
+#     loc: 'upper center'
+#     bbox_to_anchor: [0.5, 1.0]
+#     ncol: 4
 
-# plot_configs:
-#   # - value: ['nesde','MeasLow','TopRight','5']
-#   #   title: 'Low Meas Noise'
-#   - value: ['node_bboxes',]
-#     title: 'Neural ODE'
-#   - value: ['gaussian_mlp_ensemble_hid_32_ens_5',]
-#     title: 'Gaussian ensemble'
-#     mean_type: median
-#   - value: ['nesde_bboxes',]
-#     title: 'Our model'
+# # The grid configuration and extra figure parameters like spacing etc..
+# fig_args:
+#   figsize: [10, 9]
+#   nrows: 2
+#   ncols: 2
+
+# # fig_args:
+# #   figsize: [18, 5]
+# #   nrows: 1
+# #   ncols: 4
+
+# # ylim:
+# #   - [-1.1, 1.1]
+# #   - [-1.1, 1.1]
+# #   - null
+
+# # Plot general configurations
+# general_style:
+#   linewidth: 2.0
+
+# # Plot specifc configuration dictionary
+# curve_plot_style:
+#   nesde:
+#     label: "Our model"
+#     # color: "#ff7f0e"
+#     color: "#d62728"
+#     color_std: "#d62728"
+#     std_style: perc
+#     zorder: 60
+#   node:
+#     label: "Neural ODE"
+#     color: "#2ca02c"
+#     color_std: "#2ca02c"
+#     # std_style: perc
+#     # linestyle: '--'
+#     zorder: 10
+#   groundtruth:
+#     label: "Groundtruth"
+#     color: "#1f77b4"
+#     # linestyle: '--'
+#     zorder: 80
+#   dataset:
+#     label : 'Dataset'
+#     color : 'lavender'
+#     marker: 'x'
+#     markersize : 1
+#     alpha : 1.0
+#     linestyle : 'None'
+#     zorder : 10
 
 # save_config:
-#   fname: 'Unc_MSD_MeasLow_TopRight_5.png'
+#   fname: 'Prediction_NODEvsNSDE.png'
 #   dpi: 500
 
-
-
-###########################################################################
-####### Plotting state evolution wrt neural ode and groundtruth ###########
-
-# JAX_PLATFORM_NAME=cpu python pred_analysis_script.py --fun pred
-use_pgf: False
-use_pdf: False
-
-fraction: 1.2
-
-# Evaluation dataset
-train_data_name: MSD_MeasHigh_FullSpace_10
-horizon_eval: 800 # Horizon of integration for prediction comparison
-num_particles_eval: 50 # Number of particles for uncertainty
-init_config: [0.15, -0.15]
-data_spacing: 15
-
-# The models to show on the plot
-model2plot: [nesde_bboxes, node_bboxes] # , node_bboxes]
-seed_eval: 15 # The seed for the probabilistic models: sde or jax
-# The percentiles used when plotting the sde distribution
-# alpha_percentiles: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]
-# percentiles_array: [0.999, 0.99, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.25]
-
-# alpha_percentiles: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]
-# percentiles_array: [0.75, 0.70, 0.65, 0.6, 0.55, 0.53, 0.5, 0.4, 0.3, 0.25]
-
-# alpha_percentiles: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55]
-alpha_percentiles: [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60]
-percentiles_array: [0.999, 0.99, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
-
-# Which style to use for standardt deviation
-# std_style: perc75 # std or minmax or perc (for percentiles)
-alpha_std: 0.3
-
-extra_args:
-  legend_args:
-    loc: 'upper center'
-    bbox_to_anchor: [0.5, 1.0]
-    ncol: 4
-
-# The grid configuration and extra figure parameters like spacing etc..
-fig_args:
-  figsize: [10, 9]
-  nrows: 2
-  ncols: 2
-
-# fig_args:
-#   figsize: [18, 5]
-#   nrows: 1
-#   ncols: 4
-
-# ylim:
-#   - [-1.1, 1.1]
-#   - [-1.1, 1.1]
-#   - null
-
-# Plot general configurations
-general_style:
-  linewidth: 2.0
-
-# Plot specifc configuration dictionary
-curve_plot_style:
-  nesde:
-    label: "Our model"
-    # color: "#ff7f0e"
-    color: "#d62728"
-    color_std: "#d62728"
-    std_style: perc
-    zorder: 60
-  node:
-    label: "Neural ODE"
-    color: "#2ca02c"
-    color_std: "#2ca02c"
-    # std_style: perc
-    # linestyle: '--'
-    zorder: 10
-  groundtruth:
-    label: "Groundtruth"
-    color: "#1f77b4"
-    # linestyle: '--'
-    zorder: 80
-  dataset:
-    label : 'Dataset'
-    color : 'lavender'
-    marker: 'x'
-    markersize : 1
-    alpha : 1.0
-    linestyle : 'None'
-    zorder : 10
-
-save_config:
-  fname: 'Prediction_NODEvsNSDE.png'
-  dpi: 500
-
-global_legend: False
-save_config_tex:
-  fname: 'Prediction_NODEvsNSDE.tex'
+# global_legend: False
+# save_config_tex:
+#   fname: 'Prediction_NODEvsNSDE.tex'
 
 
 

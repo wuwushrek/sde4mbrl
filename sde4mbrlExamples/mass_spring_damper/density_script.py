@@ -91,12 +91,15 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
     # Now, each name in files2plot_full can be separated using __ into GradXX_RadXX_MuXX and DensityExp_XX
     # The first part is the name of the model, the second part is the name of the trajectory
     # We need to remove files that do not contains DensityExp_XX in files2plot_full
-    files = [f for f in files if any([f2p.split('__')[1] in f for f2p in files2plot_full])]
-    # Now, we need to remove files that do not contain GradXX_RadXX_MuXX in files2plot_full
-    files = [f for f in files if any([f2p.split('DensityExp')[0] in f for f2p in files2plot_full])]
+    files = [f for f in files if 'DensityExp' in f]
+    # files = [f for f in files if any([f2p.split('__')[1] in f for f2p in files2plot_full])]
+    # # Now, we need to remove files that do not contain GradXX_RadXX_MuXX in files2plot_full
+    # files = [f for f in files if any([f2p.split('DensityExp')[0] in f for f2p in files2plot_full])]
+    # print(files)
+    # print(files2plot_full)
     # print(files)
     # Make sure that the number of files is the same as the number of files2plot_full
-    assert len(files) == len(files2plot_full), "The number of files to plot is not the same as the number of files2plot_full"
+    # assert len(files) == len(files2plot_full), "The number of files to plot is not the same as the number of files2plot_full"
 
     # Exract the figure and axis specifications
     fig_specs = density_cfg['fig_args']
@@ -104,7 +107,7 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
     ncols = fig_specs['ncols']
 
     # Check if the number of subplots is the same as the number of files to plot
-    assert nrows*ncols == len(files), "The number of subplots is not the same as the number of files to plot"
+    assert nrows*ncols == len(files2plot_full), "The number of subplots is not the same as the number of files to plot"
 
     # Check if use_tex is enabled
     use_pgf = density_cfg.get('use_pgf', False)
@@ -178,12 +181,20 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
         
         # Set the x axis label
         # Add xlabel only to the bottom row
-        if itr_count >= (nrows-1)*ncols:
-            ax.set_xlabel('$q$')
+        # if itr_count >= (nrows-1)*ncols:
+        #     ax.set_xlabel('$q$')
         
-        # Add ylabel only to the leftmost column
-        if itr_count % ncols == 0:
-            ax.set_ylabel('$\dot{q}$')
+        # # Add ylabel only to the leftmost column
+        # if itr_count % ncols == 0:
+        #     ax.set_ylabel('$\dot{q}$')
+
+        # Set no ticks for the x and y axis and no tick labels
+        ax.tick_params(axis='both', which='both', length=0)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        
 
         if 'title_right' in pconf:
             # Add a twin axis on the right with no ticks and the label given by title_right
@@ -226,6 +237,14 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
             output_name = density_cfg['save_config']['fname'].split('.')[:-1]
             output_name = '.'.join(output_name) + '.pdf'
             fig.savefig(output_name, format='pdf', bbox_inches='tight')
+        
+        if 'save_config_tex' in density_cfg.keys():
+            axs[0].legend(**density_cfg.get('extra_args',{}).get('legend_args', {}))
+            tikzplotlib_fix_ncols(fig)
+            import tikzplotlib
+            density_cfg['save_config_tex']['fname'] = figure_out + density_cfg['save_config_tex']['fname']
+            tikzplotlib.clean_figure(fig)
+            tikzplotlib.save(density_cfg['save_config_tex']['fname'], figure=fig)
 
         fig.savefig(**density_cfg['save_config'], bbox_inches='tight')
 
@@ -234,6 +253,18 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
         return
     
     plt.show()
+
+def tikzplotlib_fix_ncols(obj):
+    """
+    workaround for matplotlib 3.6 renamed legend's _ncol to _ncols, which breaks tikzplotlib
+    """
+    if hasattr(obj, "_ncols"):
+        obj._ncol = obj._ncols
+    if hasattr(obj, "_dash_pattern"):
+        obj._us_dashOffset = obj._dash_pattern[0]
+        obj._us_dashSeq = obj._dash_pattern[1]
+    for child in obj.get_children():
+        tikzplotlib_fix_ncols(child)
 
 
 if __name__ == '__main__':

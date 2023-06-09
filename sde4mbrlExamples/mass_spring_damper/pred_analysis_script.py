@@ -432,13 +432,18 @@ def create_uncertainty_plots(cfg_path, learned_dir, data_dir, gt_dir):
         # Add ylabel only to the leftmost column
         if itr_count % ncols == 0:
             ax.set_ylabel(r'$\dot{q}$')
+            ax.set_ylabel(r'$\dot{q}$', rotation='horizontal')
+            ax.yaxis.set_label_coords(-0.04, 0.95)
         axs[itr_count+ncols].set_xlabel('$q$')
-        axs[ncols].set_ylabel(r'$\dot{q}$')
+        # Change xlabel position
+        axs[itr_count+ncols].xaxis.set_label_coords(0.7, -0.02)
+        axs[ncols].set_ylabel(r'$\dot{q}$', rotation='horizontal')
+        axs[ncols].yaxis.set_label_coords(-0.04, 0.95)
         
         # Now let's add the color bar if this is the last subplot of the first row
         if itr_count == ncols-1:
             cbar = fig.colorbar(pcm, ax=axs[:ncols], **density_cfg['colorbar_args'])
-            cbar.ax.set_ylabel('Err. prediction', **density_cfg.get('extra_args',{}).get('label_colorbar_args', {}))
+            cbar.ax.set_ylabel('Pred. Error', **density_cfg.get('extra_args',{}).get('label_colorbar_args', {}))
 
         # Let's take care of the second row
         _std_result = _mesh_std_evol[itr_count]

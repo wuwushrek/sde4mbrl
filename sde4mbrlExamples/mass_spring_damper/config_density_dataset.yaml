@@ -54,8 +54,8 @@ test_data:
 # mu_coeff_range: [1.0, 10.0, 100.0]
 grad_pen_range_values: [1,]
 ball_radius_range: [0.05,]
-mu_coeff_range: [9,]
-# trajId: 'DensityExp_3'
+mu_coeff_range: [11,]
+trajId: 'DensityExp_25'
 # trajId: 'DensityExp_3'
 # Learning rate going to 0.001 at 10000 iterations for learning-based mu
 
@@ -91,8 +91,7 @@ density_trainer:
     density_loss:
       # learn_mucoeff: False # Should we learn the local strong convexity parameters?
       learn_mucoeff:
-        type: constant
-        quad_approx: False
+        type: dnn
         init_value: 0.01
         activation_fn: tanh
         # hidden_layers: [16, 16]
@@ -116,6 +115,11 @@ density_trainer:
 
     # Penalty on mu learnt
     pen_mu_coeff: 1.0
+    # Penalty on mu learnt
+    pen_mu_type: lin_inv
+    pen_mu_coeff: 1.0
+    # Scaling down the dad term importance relative to data
+    # pen_scvex_mult: 0.01
 
     #########################################################################
     # Extra constraints parameterization
@@ -129,10 +133,10 @@ density_trainer:
     - name: linear_schedule
       scheduler: True
       params:
-        init_value: -0.01 # Initial learning rate (Negative value for minimization)
+        init_value: -0.005 # Initial learning rate (Negative value for minimization)
         end_value: -0.001
         #transition_steps: 30000 # Basically the maximum number of gradient steps 
-        transition_steps: 10000
+        transition_steps: 5000
     
 
   # Training parameters
@@ -230,7 +234,7 @@ texConfig:
   ytick.labelsize: 7
   legend.fontsize: 9
   axes.titlesize: 9
-  text.latex.preamble: ['\usepackage{amsmath}',]
+  # text.latex.preamble: ['\usepackage{amsmath}',]
     # font.serif: ["times", "times new roman"]
     # font.size: 10
     # axes.labelsize: 10
@@ -286,6 +290,54 @@ use_pdf: True
 #   dpi: 500
 
 
+#################################################################################
+###### First plot is the dad term with learning mu on the different dataset #####
+
+# JAX_PLATFORM_NAME=cpu python density_script.py --fun plot --learned_dir my_models/ --data_dir my_data/density_dataset/
+
+fraction: 1.0
+use_pdf: True
+
+qrange: [-0.2, 0.2]
+qdotrange: [-0.2, 0.2]
+# Number of grids on the axes
+num_grid_q: 100
+num_grid_qdot: 100
+
+extra_args:
+  title_right_args:
+    rotation: -90
+    size: large
+    labelpad: 15
+  legend_args:
+    markerscale: 3
+    fancybox: False
+    frameon: False
+    handletextpad: -0.5
+    loc: upper center
+    bbox_to_anchor: [0.2, 1.0]
+
+fig_args:
+  figsize: [16, 4]
+  nrows: 1
+  ncols: 2
+  sharex: True
+  sharey: True
+
+files2plot: 'Grad1_Rad0.05_MuXX__DensityExp_XX'
+
+plot_configs:
+  # - value: ['11', '3']
+  - value: ['11', '6']
+  - value: ['9', '25']
+
+save_config:
+  fname: 'DadTermOnFewDataSet_v2.png'
+  dpi: 500
+
+# save_config_tex:
+#   fname: 'DadTermOnFewDataSet_v2.tex'
+
 # #################################################################################
 # ###### We evaluate the effect of having the gradient constraint for fixed mu foxed 0.05 rad #####
 # fraction: 0.6 # Half the full column size
@@ -330,48 +382,48 @@ use_pdf: True
 #   dpi: 500
 
 
-#################################################################################
-###### We evaluate the effect of the ball radius for fixed mu and grad pen=1 #####
-fraction: 0.6 # Half the full column size
+# #################################################################################
+# ###### We evaluate the effect of the ball radius for fixed mu and grad pen=1 #####
+# fraction: 0.6 # Half the full column size
 
-qrange: [-0.25, 0.25]
-qdotrange: [-0.25, 0.25]
-# Number of grids on the axes
-num_grid_q: 100
-num_grid_qdot: 100
+# qrange: [-0.25, 0.25]
+# qdotrange: [-0.25, 0.25]
+# # Number of grids on the axes
+# num_grid_q: 100
+# num_grid_qdot: 100
 
-extra_args:
-  title_right_args:
-    rotation: -90
-    size: large
-    labelpad: 15
-  legend_args:
-    markerscale: 3
-    fancybox: False
-    frameon: False
-    handletextpad: -0.5
-    loc: upper center
-    bbox_to_anchor: [0.2, 1.05]
-    fontsize: 8
+# extra_args:
+#   title_right_args:
+#     rotation: -90
+#     size: large
+#     labelpad: 15
+#   legend_args:
+#     markerscale: 3
+#     fancybox: False
+#     frameon: False
+#     handletextpad: -0.5
+#     loc: upper center
+#     bbox_to_anchor: [0.2, 1.05]
+#     fontsize: 8
 
-fig_args:
-  figsize: [16, 4]
-  nrows: 1
-  ncols: 2
-  sharex: True
-  sharey: True
+# fig_args:
+#   figsize: [16, 4]
+#   nrows: 1
+#   ncols: 2
+#   sharex: True
+#   sharey: True
 
-files2plot: 'Grad1_RadXX_Mu10__DensityExp_25'
+# files2plot: 'Grad1_RadXX_Mu10__DensityExp_25'
 
-plot_configs:
-  - value: ['0.05',]
-    title: '$B_{\textrm{rad}} = 0.05$'
-  - value: ['0.1',]
-    title: '$B_{\textrm{rad}} = 0.1$'
+# plot_configs:
+#   - value: ['0.05',]
+#     title: '$B_{\textrm{rad}} = 0.05$'
+#   - value: ['0.1',]
+#     title: '$B_{\textrm{rad}} = 0.1$'
 
-save_config:
-  fname: 'DadTermBallRadIllusrtation.png'
-  dpi: 500
+# save_config:
+#   fname: 'DadTermBallRadIllusrtation.png'
+#   dpi: 500
 
 ################# Good ones ###################
 # # The list of models to plot in the configuration (usually a grid) they need to be plotted
