@@ -3,18 +3,28 @@
 vehicle_dir: ~/Documents/sde4mbrl/sde4mbrlExamples/rotor_uav/hexa_ahg
 outfile: trajs
 
+# # Path the the log data
+# train_trajectory:
+#   - ~/Documents/log_flights/hexa_ahg_rem4.ulg
+#   - ~/Documents/log_flights/hexa_ahg_rem5.ulg
+#   - ~/Documents/log_flights/hexa_ahg_rem6.ulg
+#   # - ~/Documents/log_flights/hexa_ahg_autonomous.ulg
+#   # - ~/Documents/log_flights/log_61_2023-4-4-19-57-00.ulg
+#   # More trajectories if available
+
+# Recording video dataset
 # Path the the log data
 train_trajectory:
-  - ~/Documents/log_flights/hexa_ahg_rem4.ulg
-  - ~/Documents/log_flights/hexa_ahg_rem5.ulg
-  - ~/Documents/log_flights/hexa_ahg_rem6.ulg
+  - ~/Documents/log_flights/hexa_ahg_video1.ulg
+  - ~/Documents/log_flights/hexa_ahg_video2.ulg
+  - ~/Documents/log_flights/hexa_ahg_video3.ulg
   # - ~/Documents/log_flights/hexa_ahg_autonomous.ulg
   # - ~/Documents/log_flights/log_61_2023-4-4-19-57-00.ulg
   # More trajectories if available
 
 # Testing trajectory
 test_trajectory:
-  - ~/Documents/log_flights/hexa_ahg_rem5.ulg
+  - ~/Documents/log_flights/hexa_ahg_video2.ulg
 
 # Criteria for parsing the trajectories based on minmax conditions
 criteria:
@@ -22,6 +32,7 @@ criteria:
   states: # The states for which to impose constraints when parsing the dta
     z: [0.3, 6.0] # min max value to include while training
 
+# A moving average of the control input?
 mavg_dict:
   m1: 40
   m2: 40

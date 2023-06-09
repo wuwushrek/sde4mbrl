@@ -126,10 +126,12 @@ class SDERotorModel(ControlledSDE):
         self.init_residual_networks()
 
         self.state_scaling = jnp.array(self.params.get('state_scaling', [1.0] * self.n_x))
+        max_scaling = jnp.max(self.state_scaling)
 
         # In case scaling factor is give, we also need to ensure scaling diffusion network inputs
         if 'state_scaling' in self.params:
-            self.reduced_state = lambda x : x / self.state_scaling
+            # self.reduced_state = lambda x : x / self.state_scaling
+            self.reduced_state = lambda x : x / max_scaling
 
     def get_param(self, param_name):
         """Get the value of the parameter with the given name.

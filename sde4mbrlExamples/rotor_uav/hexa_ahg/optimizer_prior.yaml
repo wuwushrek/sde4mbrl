@@ -8,13 +8,13 @@ n_y : 13
 
 
 logs_dir:
-  - ~/Documents/log_flights/hexa_ahg_rem4.ulg
-  - ~/Documents/log_flights/hexa_ahg_rem5.ulg
-  - ~/Documents/log_flights/hexa_ahg_rem6.ulg
+  - ~/Documents/log_flights/hexa_ahg_video1.ulg
+  - ~/Documents/log_flights/hexa_ahg_video2.ulg
+  - ~/Documents/log_flights/hexa_ahg_video3.ulg
   # More trajectories if available
 
 # Testing trajectory
-test_trajectory: ~/Documents/log_flights/hexa_ahg_rem5.ulg
+test_trajectory: ~/Documents/log_flights/hexa_ahg_video2.ulg
 zmin: 0.3
 
 non_neg_params: ['Ixx', 'Iyy', 'Izz', 'mass']
@@ -43,6 +43,7 @@ init_params:
 # When false, the trajectory is only filtered the first time and save on the disk
 force_filtering: True
 
+# A moving average of the control input
 mavg_dict:
   m1: 40
   m2: 40
@@ -89,7 +90,7 @@ optimizer:
   - name: linear_schedule
     scheduler: True
     params:
-      init_value: -0.01 # Initial learning rate (Negative value for minimization)
+      init_value: -0.001 # Initial learning rate (Negative value for minimization)
       end_value: -0.0001
       transition_steps: 100000 # Basically the maximum number of gradient steps 
   # - name: exponential_decay
