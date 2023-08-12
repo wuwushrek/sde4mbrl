@@ -8,7 +8,7 @@ vehicle_dir: ~/Documents/sde4mbrl/sde4mbrlExamples/rotor_uav/hexa_ahg
 data_dir: trajs.pkl
 
 # # If few parameters were learnt using static matching of model of vector field and finite difference, we specify its name here
-learned_nominal: prior_hexa_lin.yaml # a name of a learned .yaml file -> Generate this file using optimizer_prior or comment it if you don't want to learn a prior
+learned_nominal: prior_hexa_video.yaml # a name of a learned .yaml file -> Generate this file using optimizer_prior or comment it if you don't want to learn a prior
 
 # Model parameters
 model:
@@ -19,7 +19,7 @@ model:
 
   # A priori knowledge of the noise distribution over the given prior dynamics knowledge
   # noise_prior_params: [0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0.0001, 0.0001, 0.0001, 0.0001, 0.01, 0.01, 0.01]
-  noise_prior_params: [0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0.0, 0.0, 0.0, 0.0, 0.05, 0.05, 0.05]
+  noise_prior_params: [0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0.0, 0.0, 0.0, 0.0, 0.05, 0.05, 0.01]
   # noise_prior_params: [0., 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
   # This is not used when learned_nominal is not null
@@ -48,7 +48,7 @@ model:
 
   # Scaling factor for normalizing neural network inputs
   # x: 0, y: 1, z: 2, vx: 3, vy: 4, vz: 5, qw: 6, qx: 7, qy: 8, qz: 9, wx: 10, wy: 11, wz: 12
-  state_scaling: [2.6, 3.1, 2.7, 3.2, 3.5, 1.5, 1, 0.3, 0.3, 0.4, 4, 3.5, 1.4]
+  state_scaling: [2.2, 2.1, 2.7, 2.4, 2.3, 1.5, 1, 0.3, 0.3, 0.6, 2.7, 2.4, 1.5]
 
   diffusion_density_nn:
     # All inputs are contributing to the noise
@@ -67,9 +67,8 @@ model:
     
     density_nn:
       init_value: 0.001
-      activation_fn: tanh
-      hidden_layers: [16, 16]
-      aggressiveness: 0.75
+      activation_fn: swish
+      hidden_layers: [32, 32]
 
   # Ground effect learning enabled?
   ground_effect: False # True -> tb
@@ -131,13 +130,24 @@ sde_loss:
   # How the states are scaled in the loss computation
   # obs_weight: [5, 5, 5, 1.5, 1.9, 1.9, 8, 8, 8, 8, 4, 3.1, 2.2]
   # obs_weight: [1.6, 2.0, 1.9, 1.4, 1.9, 1.7, 1, 0.25, 0.25, 1, 1, 1, 1]
-  obs_weights: [2.6, 3.1, 2.7, 3.2, 3.5, 1.5, 1, 1, 1, 1, 4, 3.5, 1.4]
+  # obs_weights: [2.6, 3.1, 2.7, 3.2, 3.5, 1.5, 1, 1, 1, 1, 4, 3.5, 1.4]
+  obs_weights: [2.2, 2.1, 2.7, 2.4, 2.3, 1.5, 1, 1, 1, 1, 2.7, 2.4, 1.5]
 
-  # Density loss parameters
+  # # Density loss parameters
+  # density_loss:
+  #   learn_mucoeff: False # Should we learn the local strong convexity parameters?
+  #   mu_coeff: 10.0 # STrong convexity parameter
+  #   ball_radius: 0.05 # THe radius of the ball to sample for enforcing local strong convexity
+  #   ball_nsamples: 10 # Number of points to sample in the ball
+  
   density_loss:
-    learn_mucoeff: False # Should we learn the local strong convexity parameters?
+    learn_mucoeff:
+      type: dnn
+      init_value: 0.01
+      activation_fn: tanh
+      hidden_layers: [8, 8]
     mu_coeff: 10.0 # STrong convexity parameter
-    ball_radius: 0.05 # THe radius of the ball to sample for enforcing local strong convexity
+    ball_radius: 0.1 # THe radius of the ball to sample for enforcing local strong convexity
     ball_nsamples: 10 # Number of points to sample in the ball
   
   # Penalty for the error on the prediction
@@ -152,6 +162,12 @@ sde_loss:
   # Regularization penalty default value for all parameters
   pen_weights: 1.0e-3
 
+  # Penalty on mu learnt
+  pen_mu_type: lin_inv
+  pen_mu_coeff: 100.0
+  # Scaling down the dad term importance relative to data
+  pen_scvex_mult: 0.01
+
   #########################################################################
   # Extra constraints parameterization
   #########################################################################
@@ -161,27 +177,6 @@ sde_loss:
   special_parameters_pen: # Deviation from initial guess in init_params
     scaler: 0
     density: 0
-    # aero_kdx: 1.0e-5
-    # aero_kdy: 1.0e-5
-    # aero_kdz: 1.0e-5
-    # aero_kh: 1.0e-5
-    # mass: 10000000
-    # Ixx: 2.0
-    # Iyy: 2.0
-    # Izz: 2.0
-  
-  # special_parameters_pen: # Deviation from initial guess in init_params
-  #   # aero_kdx: 1.0e-5
-  #   # aero_kdy: 1.0e-5
-  #   # aero_kdz: 1.0e-5
-  #   # aero_kh: 1.0e-5
-  #   mass: 2.0
-  #   Ixx: 2.0
-  #   Iyy: 2.0
-  #   Izz: 2.0
-  # nonneg_nonzero:
-  #   Ixx: 1.0e-4
-
 
 sde_optimizer:
   - name: scale_by_adam

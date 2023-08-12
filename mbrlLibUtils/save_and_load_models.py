@@ -78,7 +78,8 @@ def load_learned_ensemble_model(
     ufun=None, 
     propagation_method="fixed_model", 
     rseed=1000, 
-    prior_dist=False
+    prior_dist=False,
+    device=None
 ):
     """ Load the learned model from the path
 
@@ -108,13 +109,15 @@ def load_learned_ensemble_model(
     """
     # Load the model
     model, _ = load_model_and_config(model_path, propagation_method=propagation_method)
-
-    if torch.cuda.is_available():
-        device = torch.device('cuda')
+    if device is None:
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
     else:
-        device = torch.device('cpu')
+        device = torch.device(device)
 
-    generator = torch.Generator(device=device)
+    generator = torch.Generator(device=torch.device('cuda'))
     generator.manual_seed(rseed)
 
     def sampling(y, u, rng):

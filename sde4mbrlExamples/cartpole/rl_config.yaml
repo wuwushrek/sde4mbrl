@@ -60,21 +60,13 @@ checkpoints_spacer: 10
 
 #################################################################################
 ############################ Plot desired dataset ###############################
+# JAX_PLATFORM_NAME=cpu python mfrl_with_learned_dynamics.py --fun plot
+
 plot_data_file: rewards_data_v2.pkl
 
 # The percentiles used when plotting the sde distribution
 alpha_percentiles: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55]
 percentiles_array: [0.999, 0.99, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
-
-# texConfig:
-#     text.usetex: True
-#     font.family: "serif"
-#     font.serif: ["times", "times new roman"]
-#     font.size: 10
-#     axes.labelsize: 10
-#     legend.fontsize: 10
-#     xtick.labelsize: 9
-#     ytick.labelsize: 9
 
 global_legend: True
 
@@ -85,25 +77,65 @@ curve_plot_style:
   cartpole_bb_random_sde_PPO_gt:
     # label: "PPO tested on environment"
     # color: "#ff7f0e"
+    label: "Groundtruth"
     color: "#d62728"
     color_std: "#d62728"
     zorder: 20
   cartpole_bb_random_sde_PPO:
-    label: "Policy trained with learned SDE"
+    label: "Our model, random"
     color: "#2ca02c"
     color_std: "#2ca02c"
-    linestyle: '--'
+    # linestyle: 'dotted'
+    zorder: 10
+  cartpole_bb_learned_sde_PPO_gt:
+    # label: "PPO tested on environment"
+    # color: "#ff7f0e"
+    label: "Groundtruth"
+    color: "#d62728"
+    color_std: "#d62728"
+    zorder: 20
+  cartpole_bb_learned_sde_PPO:
+    label:  "Our model, On-policy"
+    color: "#2ca02c"
+    color_std: "#2ca02c"
+    # linestyle: 'dotted'
+    zorder: 10
+  cartpole_bb_learned_si_sde_PPO_gt:
+    # label: "PPO tested on environment"
+    # color: "#ff7f0e"
+    label: "Groundtruth"
+    color: "#f62728"
+    color_std: "#f62728"
+    zorder: 20
+  cartpole_bb_learned_si_sde_PPO:
+    label: "Our model with side info, On-policy"
+    color: "#5ca02c"
+    color_std: "#5ca02c"
+    # linestyle: 'dotted'
     zorder: 10
   gaussian_mlp_ensemble_cartpole_learned_PPO_gt:
-    label: "Policy tested in environment"
+    # label: "Policy tested in environment"
+    label: "Groundtruth"
     color: "#d62728"
     color_std: "#d62728"
     zorder: 20
   gaussian_mlp_ensemble_cartpole_learned_PPO:
-    label: "Policy trained with learned PE"
+    label: "Gaussian ensemble, on-policy"
     color: "#9467bd"
     color_std: "#9467bd"
-    linestyle: '--'
+    # linestyle: 'dotted'
+    zorder: 10
+  gaussian_mlp_ensemble_cartpole_random_PPO_gt:
+    # label: "Gaussian ensemble, random"
+    label: "Groundtruth"
+    color: "#d62728"
+    color_std: "#d62728"
+    zorder: 20
+  gaussian_mlp_ensemble_cartpole_random_PPO:
+    label: "Gaussian ensemble, random"
+    color: "#9467bd"
+    color_std: "#9467bd"
+    # linestyle: 'dotted'
     zorder: 10
   # groundtruth_PPO_gt:
   #   label: "Rew. on Groundtruth"
@@ -114,7 +146,7 @@ curve_plot_style:
     label: "MF PPO"
     color: "#1f77b4"
     color_std: "#1f77b4"
-    linestyle: '--'
+    # linestyle: 'dotted'
     zorder: 20
   # groundtruth_PPO_max:
   #   label: "Best agent groundtruth"
@@ -123,7 +155,7 @@ curve_plot_style:
   groundtruth_PPO_data:
     label: "MF PPO with $100$ trajectories"
     color: "#8c564b"
-    linestyle: '-.'
+    # linestyle: 'dotted'
     linewidth: 3
     zorder: 5
 
@@ -149,16 +181,36 @@ alpha_std: 0.5
 best_rew_gt: [groundtruth_PPO, ]
 total_env_interact_for_training_data: 20000
 
+# plot_configs:
+#   - value: ['groundtruth_PPO',]
+#   - value: ['cartpole_bb_random_sde_PPO', 'cartpole_bb_random_sde_PPO_gt']
+#     yaxis: False
+#   - value: ['gaussian_mlp_ensemble_cartpole_random_PPO', 'gaussian_mlp_ensemble_cartpole_random_PPO_gt']
+#     yaxis: False
+
 plot_configs:
-  - value: ['groundtruth_PPO',]
+  - value: ['cartpole_bb_learned_si_sde_PPO', 'cartpole_bb_learned_si_sde_PPO_gt']
+  - value: ['cartpole_bb_learned_sde_PPO', 'cartpole_bb_learned_sde_PPO_gt']
+    yaxis: False
   - value: ['gaussian_mlp_ensemble_cartpole_learned_PPO', 'gaussian_mlp_ensemble_cartpole_learned_PPO_gt']
     yaxis: False
-  - value: ['cartpole_bb_random_sde_PPO', 'cartpole_bb_random_sde_PPO_gt']
-    yaxis: False
+
+
+# save_config:
+#   fname: 'NSDEvsGaussian_random.png'
+#   dpi: 500
+
+# global_legend: False
+# save_config_tex:
+#   fname: 'NSDEvsGaussian_random.tex'
 
 save_config:
-  fname: 'MF_PPO_sdeVsGaussian.png'
+  fname: 'NSDEvsGaussian_learned.png'
   dpi: 500
+
+global_legend: False
+save_config_tex:
+  fname: 'NSDEvsGaussian_learned.tex'
 
 ######################################################################################
 ##################################### Gap plot #######################################

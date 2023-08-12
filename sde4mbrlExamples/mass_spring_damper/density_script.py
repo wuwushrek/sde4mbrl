@@ -3,7 +3,8 @@
 import os
 import jax
 import numpy as np
-import matplotlib.pyplot as plt
+
+import matplotlib as mpl
 
 
 from mass_spring_model import gen_traj_yaml, train_models_on_dataset, load_learned_diffusion, _load_pkl
@@ -12,6 +13,25 @@ from sde4mbrl.utils import load_yaml
 from tqdm.auto import tqdm
 
 MODEL_NAME = "nesde"
+
+def get_size_paper(width_pt, fraction=1, subplots=(1,1)):
+    """ Get the size of the figure in inches
+        width_pt: Width of the figure in latex points
+        fraction: Fraction of the width which you wish the figure to occupy
+        subplots: The number of rows and columns
+    """
+    # Width of the figure in inches
+    fig_width_pt = width_pt * fraction
+    # Convert from pt to inches
+    inches_per_pt = 1 / 72.27
+    # Golden ratio to set aesthetic figure height
+    golden_ratio = (5**.5 - 1) / 2
+    # Figure width in inches
+    fig_width_in = fig_width_pt * inches_per_pt
+    # Figure height in inches
+    fig_height_in = fig_width_in * golden_ratio * (subplots[0] / subplots[1])
+    return (fig_width_in, fig_height_in)
+
 
 def train_density_model(model_dir, density_cfg):
     """ Train the density model for different values of the parameters and different trajectories
@@ -28,7 +48,7 @@ def train_density_model(model_dir, density_cfg):
                 modified_params['sde_loss']['density_loss']['ball_radius'] = brad
                 modified_params['sde_loss']['density_loss']['mu_coeff'] = mucoeff
                 model_name = f"nesde_Grad{gval}_Rad{brad}_Mu{mucoeff}"
-                train_models_on_dataset(model_dir, model_name, 'DensityExp', modified_params=modified_params)
+                train_models_on_dataset(model_dir, model_name, density_cfg['trajId'], modified_params=modified_params)
 
 
 def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
@@ -57,7 +77,8 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
     rng_key = jax.random.PRNGKey(density_cfg['seed_mesh'])
 
     # Extract all files in the directory containing DensityExp in learned_dir and edning with _sde.pkl
-    files = [f for f in os.listdir(learned_dir) if 'DensityExp' in f and f.endswith('_sde.pkl')]
+    # files = [f for f in os.listdir(learned_dir) if 'DensityExp' in f and f.endswith('_sde.pkl')]
+    files = [f for f in os.listdir(learned_dir) if f.endswith('_sde.pkl')]
 
     # Extract files2plot which provide a template in form of GradXX_RadXX_MuXX__DensityExp_XX
     files2plot = density_cfg['files2plot']
@@ -70,11 +91,15 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
     # Now, each name in files2plot_full can be separated using __ into GradXX_RadXX_MuXX and DensityExp_XX
     # The first part is the name of the model, the second part is the name of the trajectory
     # We need to remove files that do not contains DensityExp_XX in files2plot_full
-    files = [f for f in files if any([f2p.split('__')[1] in f for f2p in files2plot_full])]
-    # Now, we need to remove files that do not contain GradXX_RadXX_MuXX in files2plot_full
-    files = [f for f in files if any([f2p.split('DensityExp')[0] in f for f2p in files2plot_full])]
+    files = [f for f in files if 'DensityExp' in f]
+    # files = [f for f in files if any([f2p.split('__')[1] in f for f2p in files2plot_full])]
+    # # Now, we need to remove files that do not contain GradXX_RadXX_MuXX in files2plot_full
+    # files = [f for f in files if any([f2p.split('DensityExp')[0] in f for f2p in files2plot_full])]
+    # print(files)
+    # print(files2plot_full)
+    # print(files)
     # Make sure that the number of files is the same as the number of files2plot_full
-    assert len(files) == len(files2plot_full), "The number of files to plot is not the same as the number of files2plot_full"
+    # assert len(files) == len(files2plot_full), "The number of files to plot is not the same as the number of files2plot_full"
 
     # Exract the figure and axis specifications
     fig_specs = density_cfg['fig_args']
@@ -82,12 +107,34 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
     ncols = fig_specs['ncols']
 
     # Check if the number of subplots is the same as the number of files to plot
-    assert nrows*ncols == len(files), "The number of subplots is not the same as the number of files to plot"
+    assert nrows*ncols == len(files2plot_full), "The number of subplots is not the same as the number of files to plot"
+
+    # Check if use_tex is enabled
+    use_pgf = density_cfg.get('use_pgf', False)
+    use_pdf = density_cfg.get('use_pdf', False)
+    if use_pgf:
+        mpl.use("pgf")
+    
+    # Import the matplotlib.pyplot
+    import matplotlib.pyplot as plt
+
+    # Modify the figure size if use_pgf is enabled or use_pdf is enabled
+    if use_pgf or use_pdf:
+        paper_width_pt = density_cfg['paper_width_pt']
+        fraction = density_cfg['fraction']
+        # Get the size of the figure in inches
+        fig_size = get_size_paper(paper_width_pt, fraction=fraction, subplots=(nrows, ncols))
+        # Set the figure size
+        fig_specs['figsize'] = fig_size
+        # Set the rcParams
+        plt.rcParams.update(density_cfg['texConfig'])
 
     # Create the figure
     fig, axs_2d = plt.subplots(**fig_specs)
-    # Flatten the axes
-    axs = axs_2d.flatten()
+    if hasattr(axs_2d, 'shape'):
+        axs = axs_2d.flatten()
+    else:
+        axs = [axs_2d]
 
     # Loop over the files
     itr_count = 0
@@ -121,23 +168,33 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
         
         # Scale the mesh between 0 and 1 if we are using the density network directly instead of a sigmoid of the density network
         if net:
+            print(np.min(_mesh_pred_density), np.max(_mesh_pred_density))
             _mesh_pred_density = (_mesh_pred_density - np.min(_mesh_pred_density)) / (np.max(_mesh_pred_density) - np.min(_mesh_pred_density))
+        # _mesh_pred_density = (_mesh_pred_density - np.min(_mesh_pred_density)) / (np.max(_mesh_pred_density) - np.min(_mesh_pred_density))
 
         # Plot the mesh
         pcm = ax.pcolormesh(qgrid, qdotgrid, _mesh_pred_density, vmin=0, vmax=1,**density_cfg['mesh_args'])
 
         # Set the title if 'title' is in pconf
         if 'title' in pconf:
-            ax.set_title(pconf['title'])
+            ax.set_title(r"{}".format(pconf['title']))
         
         # Set the x axis label
         # Add xlabel only to the bottom row
-        if itr_count >= (nrows-1)*ncols:
-            ax.set_xlabel('$q$')
+        # if itr_count >= (nrows-1)*ncols:
+        #     ax.set_xlabel('$q$')
         
-        # Add ylabel only to the leftmost column
-        if itr_count % ncols == 0:
-            ax.set_ylabel('$\dot{q}$')
+        # # Add ylabel only to the leftmost column
+        # if itr_count % ncols == 0:
+        #     ax.set_ylabel('$\dot{q}$')
+
+        # Set no ticks for the x and y axis and no tick labels
+        ax.tick_params(axis='both', which='both', length=0)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        
 
         if 'title_right' in pconf:
             # Add a twin axis on the right with no ticks and the label given by title_right
@@ -167,13 +224,47 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
     _ = fig.colorbar(pcm, ax=axs, **density_cfg['colorbar_args'])
 
     # Save the figure
-    density_cfg['save_config']['fname'] = figure_out + density_cfg['save_config']['fname']
-    fig.savefig(**density_cfg['save_config'])
+    if 'save_config' in density_cfg:
+        density_cfg['save_config']['fname'] = figure_out + density_cfg['save_config']['fname']
+        if use_pgf:
+            # Replace the extension with pgf
+            output_name = density_cfg['save_config']['fname'].split('.')[:-1]
+            output_name = '.'.join(output_name) + '.pgf'
+            fig.savefig(output_name, format='pgf')
+        
+        if use_pdf:
+            # Replace the extension with pdf
+            output_name = density_cfg['save_config']['fname'].split('.')[:-1]
+            output_name = '.'.join(output_name) + '.pdf'
+            fig.savefig(output_name, format='pdf', bbox_inches='tight')
+        
+        if 'save_config_tex' in density_cfg.keys():
+            axs[0].legend(**density_cfg.get('extra_args',{}).get('legend_args', {}))
+            tikzplotlib_fix_ncols(fig)
+            import tikzplotlib
+            density_cfg['save_config_tex']['fname'] = figure_out + density_cfg['save_config_tex']['fname']
+            tikzplotlib.clean_figure(fig)
+            tikzplotlib.save(density_cfg['save_config_tex']['fname'], figure=fig)
+
+        fig.savefig(**density_cfg['save_config'], bbox_inches='tight')
 
     # Plot the figure
+    if use_pgf:
+        return
+    
     plt.show()
 
-
+def tikzplotlib_fix_ncols(obj):
+    """
+    workaround for matplotlib 3.6 renamed legend's _ncol to _ncols, which breaks tikzplotlib
+    """
+    if hasattr(obj, "_ncols"):
+        obj._ncol = obj._ncols
+    if hasattr(obj, "_dash_pattern"):
+        obj._us_dashOffset = obj._dash_pattern[0]
+        obj._us_dashSeq = obj._dash_pattern[1]
+    for child in obj.get_children():
+        tikzplotlib_fix_ncols(child)
 
 
 if __name__ == '__main__':
@@ -184,7 +275,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Mass Spring Damper Model, Data Generator, and Trainer')
 
     # Add the arguments
-    parser.add_argument('--fun', type=str, default='gen_traj', help='The function to run')
+    parser.add_argument('--fun', type=str, default='plot', help='The function to run')
     parser.add_argument('--model_dir', type=str, default='mass_spring_damper.yaml', help='The model configuration and groundtruth file')
     parser.add_argument('--density_cfg', type=str, default='config_density_dataset.yaml', help='The data generation adn training configuration file')
     parser.add_argument('--learned_dir', type=str, default='', help='The directory where all the models are stored')
