@@ -193,14 +193,3 @@ def get_value_from_dict(kval, dict_val):
             else:
                 return fv
     return None
-
-    # for k, v in dict_val.items():
-    #     if isinstance(v, collections.abc.Mapping):
-    #         fv =  get_value_from_dict(kval, v)
-    #         if fv is None:
-    #             continue
-    #         else:
-    #             return fv
-    #     elif k == kval:
-    #         return v
-    # return None

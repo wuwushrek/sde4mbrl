@@ -11,7 +11,7 @@ model:
   n_y: 2
   n_u: 1
 
-  # This is not used when learned_nominal is not null
+  # This is not used when learning the model. It provides only the groundtruth for evaluation purpose
   init_params:
     mass: 1.0
     kq_coeff: 1.0
@@ -19,39 +19,14 @@ model:
   
   # A priori knowledge of the noise distribution over the given prior dynamics knowledge
   noise_prior_params: [0.001, 0.01]
-  # noise_prior_params: [0.0, 0.0]
+  # noise_prior_params: [0.0, 0.0] # Can be set to zero for ODEs
 
 
   # The parameter specifies if control is enabled or not on the model
-  # The code has been optimized to not have control inputs
   control: False
 
   # Is the noise term dependent on the control? Does the density needs to be estimated by merging state and control?
   control_dependent_noise: False # If not specified, False is the default value
-
-
-  diffusion_density_nn:
-
-    # Inputs that contribute to the noise estimation
-    indx_noise_in: [0,1] # If not specified, it is all the inputs
-
-    # The learned noise only operates on this set of outputs
-    # For this example, the first component dynamics are well known and not noisy
-    indx_noise_out: [1,] # If not specified, it is all the putputs
-
-    # Density scaler function -> learn heteregeous noise or homogeneous noise with none type
-    scaler_nn:
-      type: scaler
-      init_value: 0.01
-      # activation_fn: tanh
-      # hidden_layers: [4, 4]
-    
-    density_nn:
-      init_value: 0.1
-      activation_fn: swish
-      hidden_layers: [32, 32]
-      # aggressiveness: 0.75
-
 
   # Vector field unknown terms
   residual_forces:
@@ -60,6 +35,30 @@ model:
     hidden_layers: [4, 16]
     activation_fn: 'swish'
     init_value: 0.001
+
+  diffusion_density_nn:
+
+    # Inputs that contribute to the unceratinty estimate
+    indx_noise_in: [0,1] # If not specified, it is all the inputs
+
+    # The components of the state where the noise is added
+    # For this example, the first component dynamics are well known and not noisy
+    indx_noise_out: [1,] # If not specified, it is all the state channels
+
+    # Density scaler function -> enable to learn heteregeous noise or homogeneous noise (by commenting it)
+    # In the paper, this is the W and b in 2.2: Modeling details.
+    scaler_nn:
+      type: scaler
+      init_value: 0.01
+      # activation_fn: tanh
+      # hidden_layers: [4, 4]
+    
+    # The actual density term
+    # In the paper, this is the NN_psi(x,u) in 2.2: Modeling details.
+    density_nn:
+      init_value: 0.1
+      activation_fn: swish
+      hidden_layers: [32, 32]
 
 
   # Define the parameters for the SDE solver
@@ -87,13 +86,14 @@ sde_loss:
 
   # Number of particles when fitting the SDE -> If different to the default model num_particles
   num_particles: 1
-  num_particles_test: 20
+  num_particles_test: 20 # Number of particles when doing test evaluations
 
   # This is the horizon of integration when computing the loss
   # It might get clipped to the horizon of each trajectory in the dataset if it's greater than trajectory length
   horizon: 50
 
   # Randomly subsample the horizon to fit only num_sample2consider if given
+  # This simulates irreguarly sampled integration and fitting
   num_sample2consider: 10
 
   # Density loss parameters
@@ -132,7 +132,8 @@ sde_loss:
   #########################################################################
 
   default_weights: 1.0
-  special_parameters_pen: # Dev iation from initial guess in init_params
+  special_parameters_pen: # Deviation from initial guess in init_params
+    # We do not penalize the parameters of the diffusion terms
     scaler: 0
     density: 0
 

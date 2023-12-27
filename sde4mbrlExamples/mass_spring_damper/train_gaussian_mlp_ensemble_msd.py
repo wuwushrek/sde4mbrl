@@ -36,7 +36,7 @@ def run_training(cfg, data_file_name, test_data_file_name = 'MSD_TestData.pkl', 
     data_config_file_name = data_file_name[0:-4] + '_config.yaml'
     test_data_config_file_name = test_data_file_name[0:-4] + '_config.yaml'
 
-    data_path = os.path.abspath(os.path.join(os.path.curdir, 'my_data'))
+    data_path = 'my_data/'
     with open(os.path.abspath(os.path.join(data_path, data_file_name)), 'rb') as f:
         data = pickle.load(f)
     with open(os.path.abspath(os.path.join(data_path, data_config_file_name))) as f:
@@ -96,9 +96,10 @@ def run_training(cfg, data_file_name, test_data_file_name = 'MSD_TestData.pkl', 
 
     # Save the learned model
     if save_results:
-        experiment_name = 'gaussian_mlp_ensemble_hid_' + str(cfg['dynamics_model']['model']['hid_size']) + \
-            '_ens_' + str(cfg['dynamics_model']['model']['ensemble_size']) + '__' + \
+        experiment_name = 'gaussian_mlp_ensemble_hid_' + str(cfg['dynamics_model']['hid_size']) + \
+            '_ens_' + str(cfg['dynamics_model']['ensemble_size']) + '__' + \
                    data_config_file_name[:data_config_file_name.index('_config')] + '_sde'
+        save_folder = 'my_models/' + experiment_name
         save_folder = os.path.abspath(os.path.join(os.path.curdir, 'my_models', experiment_name))
         save_model_and_config(dynamics_model, cfg, save_folder)
         train_callback.save_training_results(save_folder)
@@ -109,6 +110,20 @@ def run_training(cfg, data_file_name, test_data_file_name = 'MSD_TestData.pkl', 
 
 
 if __name__ == '__main__':
+    import argparse
+    
+    # Create the parser
+    parser = argparse.ArgumentParser(description='Mass Spring Damper Model, Data Generator, and Trainer')
+
+    # Add the arguments
+    parser.add_argument('--data', type=str, default='', help='Specific data file to train on')
+
+    # Execute the parse_args() method
+    args = parser.parse_args()
+
+    specific_data_file = None if args.data == '' else args.data
+
+
     from config.gaussian_mlp_ensemble_msd_config import ensemble_cfg as cfg
     seed = 42
 
@@ -118,7 +133,9 @@ if __name__ == '__main__':
     for file_name in os.listdir(data_dir):
         if 'MSD_Meas' in file_name and '.pkl' in file_name:
             data_file_name = file_name
-        
+            if specific_data_file is not None:
+                if specific_data_file not in data_file_name:
+                    continue
             print("Training on {}".format(data_file_name))
             train_losses, val_losses = run_training(cfg, data_file_name, test_data_file_name, seed, save_results=True)
 

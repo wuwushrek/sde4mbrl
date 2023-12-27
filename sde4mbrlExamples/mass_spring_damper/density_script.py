@@ -1,4 +1,4 @@
-""" This script generate the dataset and plots used in the paper
+""" This script generates the dataset and plots used in the paper
 """
 import os
 import jax
@@ -59,12 +59,14 @@ def create_density_mesh_plots(density_cfg, learned_dir, data_dir, net=False):
     density_cfg = load_yaml(density_cfg)
     # Check if learned_dir is empty, if so, use the default directory given by the current path
     if len(learned_dir) == 0:
-        learned_dir = os.path.dirname(os.path.realpath(__file__)) + '/my_models/density_models/'
+        learned_dir = 'my_models/'
     # Check if data_dir is empty, if so, use the default directory given by the current path
     if len(data_dir) == 0:
-        data_dir = os.path.dirname(os.path.realpath(__file__)) + '/my_data/density_dataset/'
+        data_dir = 'my_data/'
     # The directory where the plots will be stored
     figure_out = data_dir + 'density_plots/'
+    if not os.path.exists(figure_out):
+        os.makedirs(figure_out)
 
     # Extract the grid limits for the mesh plot
     qrange = density_cfg['qrange']

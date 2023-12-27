@@ -51,12 +51,14 @@ def create_density_mesh_plots(cfg_path, learned_dir, data_dir):
     density_cfg = load_yaml(cfg_path)
     # Check if learned_dir is empty, if so, use the default directory given by the current path
     if len(learned_dir) == 0:
-        learned_dir = os.path.dirname(os.path.realpath(__file__)) + '/my_models/'
+        learned_dir = 'my_models/'
     # Check if data_dir is empty, if so, use the default directory given by the current path
     if len(data_dir) == 0:
-        data_dir = os.path.dirname(os.path.realpath(__file__)) + '/my_data/'
+        data_dir = 'my_data/'
     # The directory where the plots will be stored
     figure_out = data_dir + 'figures/'
+    if not os.path.exists(figure_out):
+        os.makedirs(figure_out)
 
     # Extract the grid limits for the mesh plot
     qrange = density_cfg['qrange']

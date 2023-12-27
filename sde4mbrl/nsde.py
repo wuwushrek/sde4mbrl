@@ -5,18 +5,19 @@ import haiku as hk
 # Store the SDE solvers and their corresponding names
 from sde4mbrl.sde_solver import sde_solver_name
 
+# ELementary functions to manipulate dictionaries
 from sde4mbrl.utils import set_values_all_leaves, update_same_struct_dict
 from sde4mbrl.utils import get_penalty_parameters, get_non_negative_params
 
 # from sde4mbrl.utils import initialize_problem_constraints
-
 import copy
 
-
 def compute_timesteps(params):
-    """ Compute the timesteps for the numerical integration of the SDE
+    """ Compute the timesteps for the numerical integration of the SDE.
     The timesteps are computed as follows:
-        - params is a dictionary with that must contains the keys: horizon, stepsize; optional:  num_short_dt, short_step_dt, long_step_dt
+        - params is a dictionary that must contains the keys: horizon, stepsize; 
+            optional:  num_short_dt, short_step_dt, long_step_dt
+
         - horizon = total number of timesteps
         - stepsize = size of the timestep dt
         - The first num_short_dt timesteps are of size short_step_dt if given else stepsize
@@ -39,6 +40,37 @@ def compute_timesteps(params):
     return jnp.array([short_step_dt] * num_short_dt + [long_step_dt] * num_long_dt)
 
 
+def sampling_strat_under_dataset_with_finer_steps(arr, strategy, rng_den):
+    """ Given an array of size (horizon, num_steps2data, ...) and a sampling strategy,
+    this function returns an array of size (horizon, ...) where each element is sampled from the dataset
+    according to the sampling strategy.
+
+    Args:
+        arr (jnp.array): The array of size (horizon, num_steps2data, ...)
+        strategy (str): The sampling strategy. Choose from first, mean, median, random
+        rng_den (jax.random.PRNGKey): The random key
+
+    Returns:
+        jnp.array: The array of size (horizon, ...)
+    """
+    horizon = arr.shape[0]
+    num_steps2data = arr.shape[1]
+
+    if strategy == 'first':
+        arr = arr[:,0,...] if len(arr.shape) > 2 else arr[:,0]
+    elif strategy == 'mean':
+        arr = arr.mean(axis=1)
+    elif strategy == 'median':
+        arr = jnp.median(arr, axis=1)
+    elif strategy == 'random':
+        rnd_indx = jax.random.randint(rng_den, shape=(horizon,), minval=0, maxval=num_steps2data)
+        arr = arr[jnp.arange(horizon), rnd_indx, ...] if len(arr.shape) > 2 else arr[jnp.arange(horizon), rnd_indx]
+    else:
+        raise ValueError('Unknown u_sampling_strategy: {}. Choose from first, mean, median, random'.format(strategy))
+    return arr
+
+
+# [TODO Franck]: Document this function after checking the sde modeling and its docs 
 def initialize_problem_constraints(n_x, n_u, params_model):
     """Check if there are any constraints involved on the hidden states or the inputs
        of the sde model. The constraints are going to be enforced via nonsmooth optimization
@@ -81,6 +113,8 @@ def initialize_problem_constraints(n_x, n_u, params_model):
         assert len(slack_dict['state_id']) <= n_x and \
                 len(slack_dict['state_id']) == len(slack_dict['state_bound']),\
                 'The number of the constrained states identifier does not match the number of bounds'
+        for _idx in slack_dict['state_id']:
+            assert _idx < n_x, 'The state identifier is out of bound {}/{}'.format(_idx, n_x)
         state_idx = jnp.array(slack_dict['state_id'])
         slack_proximal = slack_dict['slack_proximal']
         penalty_coeff = slack_dict['state_penalty']
@@ -96,19 +130,23 @@ def initialize_problem_constraints(n_x, n_u, params_model):
 
 
 class ControlledSDE(hk.Module):
-    """Define an SDE object (stochastic dynamical system) with observation and state (latent) variable
+    """Define an SDE (stochastic differential equation) with observation and state (latent) variables
     and which is controlled via a control input. 
-    Typically \dot{x} = f(x, u) dt + sigma(x;u) dW, where the SDE is defined by the drift f and the diffusion sigma.
-    The SDE could be in the Ito or Stratonovich sense. The choice of the sde solver will determine if the SDE is an Ito or Stratonovich SDE.
 
-    This class implements several functions for deep NNs modeling and control of dynamical systems with conservative uncertainty estimation.
+    Typically \dot{x} = f(x, u) dt + sigma(x;u) dW, where the SDE is defined by the drift f and the diffusion sigma.
+    The SDE could be in the Ito or Stratonovich sense. 
+    The choice of the sde solver will determine if the SDE is an Ito or Stratonovich SDE.
+
+    This class implements several functions for deep NNs modeling and control of dynamical systems with conservative uncertainty estimate.
+    By conservative uncertainty estimate, we mean in the sense of distance awareness from the training data.
+
     The class is designed to be inherited by the user to define the SDE model and the control policy.
     
-    The class will the following functionalities:
+    The class has the following functionalities:
         (a) Train an SDE to fit data given a priori knowledge on the dynamical systems as inductive bias 
-        (b) The learned SDE must be able to provide uncertainty estimates on what they don't know
-        (c) We provide a way to control the SDE using a gradient-based MPC controller + NN policy + Value function
-        (d) Sample from the learned SDE model
+        (b) The learned SDE must be able to provide distance-aware uncertainty estimates on their predictions
+        (c) We provide a way to control the SDE using a gradient-based MPC controller
+        (d) Fast sampling from the learned SDE model through numerical integration of the SDE
 
     A user should create a class that inherits the properties of this class while redefining the functions below:
 
@@ -132,7 +170,9 @@ class ControlledSDE(hk.Module):
             And they are tipically in the form of a function h(g_1, g_2, ..., g_n) <= 0 for x in a given region of the state space stored in params_model['constraints']
 
         - [Optional] init_encoder : 
-            Initialize the encoder function -> Provide a way to go from observation to state and its log probability
+            Initialize the encoder/decoder functions -> Provide a way to go from observation to state and its log probability
+            This is useful when we have a latent state that is not directly observed and we want to learn it from the observations.
+        
     """
     def __init__(self, params, name=None):
         """Initialize the parameterized sde prior and posterior dynamics
@@ -178,9 +218,11 @@ class ControlledSDE(hk.Module):
 
 
     def prior_diffusion(self, x, u, extra_args=None):
-        """ Define the prior noise function over the knowledge of the dynamics of the system
-        The prior noise function is a function of the state and possibly the control input.
-        This work assumes diagonal noise, but the user can define a more complex noise function
+        """ Define the prior noise function over the knowledge of the dynamics of the system.
+        This prior function defines the maimum noise that we expect to see in the system predictions outside the data region.
+
+        The prior noise is a function of the state and possibly the control input.
+        This code assumes diagonal noise, but the user can define a more complex noise function
 
         Args:
             x (TYPE): The current state of the system (aka latent state)
@@ -194,11 +236,15 @@ class ControlledSDE(hk.Module):
     
     def compositional_drift(self, x, u, extra_args=None):
         """Define the drift term of the SDE model to learn.
-        The compositional drift is a function of the state and the control input.
+        The compositional drift is a function of the state and the control input, which incorporates prior knowledge on the system.
+
         We write it as compositional_drift(x,u) = f(x,u) =  F(x, u, g_1(x), g_2(x), ..., g_n(x)), 
         where g_i are the functions that define the drift and that are parametrized by NNs in our framework.
         This form on the drift informs the learning with prior knowledge on the dynamical system.
         Such prior knowledge is typically obtained as an ODE from physics or engineering.
+
+        The NNs' parameters should be initialized by the user in the init function of the custom class, and 
+        can be used in the compositional_drift function to define the drift term of the SDE.
 
         Args:
             x (TYPE): The current state of the system (aka latent state)
@@ -212,8 +258,11 @@ class ControlledSDE(hk.Module):
 
     def prior_constraints(self, x, u):
         """Define the constraints that may be known on the unknown terms of the compositional drift.
+
         These constraints, if present, are going to be enforced during the learning process.
-        And they are tipically in the form of a function h(g_1, g_2, ..., g_n) <= 0 for x in a given region of the state space stored in params_model['constraints']
+        
+        They are typically in the form of a function h(g_1, g_2, ..., g_n) <= 0 for x 
+        in a given region of the state space stored in params_model['constraints']
 
         Args:
             x (TYPE): The current state of the system (aka latent state)
@@ -226,33 +275,70 @@ class ControlledSDE(hk.Module):
         return None
 
     def reduced_state(self, _x):
-        """ User-defined function to reduce the state / latent space for noise estimation
+        """ User-defined function to reduce the state / latent space for noise estimation.
+        This function is used to reduce the state dimensionality such that the distance aware noise estimation
+        is depending only on states that are relevant for the system dynamics.
+
+        If the function is not redefined by the user, identity function is used.
+
+        Assumptiom: The size of the reduced state must match the size of the attribute indx_noise_in, which 
+        is used to select the states in the subset of states that are used for noise estimation.
+        For example, if indx_noise_in = [0, 1, 3], then the reduced state must be of size at least 4. And the distance
+        aware noise estimation will be performed only on the states y[0], y[1] and y[3], where y = reduced_state(x).
+
+        If the function is not identity, then the user must redefined indx_noise_in
+
+        Args:
+            _x (TYPE): The current state of the system (aka latent state)
         """
         return _x
     
     def construct_diffusion_density_nn(self):
-        """ Define the neural network that parametrizes the diffusion's density over the training dataset.
-            The density could be a function of the state and the control input, or only of the state.
-            The density is a scalar function that is used to compute the prior diffusion multiplier.
+        """ Define the neural network that parametrizes the diffusion's density (eta in the paper), distance awareness, over the training dataset.
+
+            The density (eta in the paper) could be a function of the state and the control input, or only of the state.
+            The density (eta in the paper)  is a scalar function that is used to compute the prior diffusion multiplier.
             Around the data, the density function would be close to zero or encloses the aleatoric uncertainty.
             And far from the data, the density function would be close to one and the noise would be close to the prior diffusion.
+            
             density : \eta(x, u; \theta) or \eta(x, \theta) -> A real-valued function
+
+            scaler: A neural network that parametrizesthat enable heteroscedastic noise estimation.
+            
             Total diffusion : \sigma(x, u) = [ \eta(x, u; \theta) * scaler(\theta) ] \sigma_{prior}(x, u)
+
             Few parameters' names:
-                - diffusion_density_nn : The name of the key with the parameters of the density NN and scaler. If not present, the density and scaler is assumed to be 1
-                - diffusion_density_nn -> indx_noise_in : The indexes of the states that contribute to the noise (if not given, all states contribute)
-                - diffusion_density_nn -> indx_noise_out : The indexes of the outputs that contribute to the noise (if not given, all outputs contribute)
+                - diffusion_density_nn : 
+                    The name of the key with the parameters of the density NN and scaler. If not present, the system is considered as an ODE.
                 
-                - diffusion_density_nn -> scaler_nn : The name of the key with the parameters of the scaler NN. If not present, the scaler is assumed to be 1
-                - diffusion_density_nn -> scaler_nn -> type : {nn, scaler} default is scaler
-                - diffusion_density_nn -> scaler_nn -> init_value : The parameters are uniformly initialized in the range [-init_value, init_value]
+                - diffusion_density_nn -> indx_noise_in : 
+                    The indexes of the reduced states that contribute to the noise (if not given, all states contribute)
+                
+                - diffusion_density_nn -> indx_noise_out : 
+                    The indexes of the outputs that contribute to the noise (if not given, all outputs contribute)
+                
+                - diffusion_density_nn -> scaler_nn : 
+                    The name of the key with the parameters of the scaler NN. If not present, the scaler is assumed to be 1
+                
+                - diffusion_density_nn -> scaler_nn -> type : 
+                    {nn, scaler} default is scaler
+                    [TODO] Add more scaler options here
+                
+                - diffusion_density_nn -> scaler_nn -> init_value : 
+                    The parameters are uniformly initialized in the range [-init_value, init_value]
+                
                 - diffusion_density_nn -> scaler_nn -> activation_fn, hidden_layers -> The parameters of the NN in case type is nn
                 
-                - diffusion_density_nn -> density_nn : The name of the key with the parameters of the density NN
-                - diffusion_density_nn -> density_nn -> init_value : The parameters are uniformly initialized in the range [-init_value, init_value]
+                - diffusion_density_nn -> density_nn : 
+                    The name of the key with the parameters of the density NN
+
+                - diffusion_density_nn -> density_nn -> init_value : 
+                    The parameters are uniformly initialized in the range [-init_value, init_value]
+
                 - diffusion_density_nn -> density_nn -> activation_fn, hidden_layers -> The parameters of the NN
 
         """
+
         # Define the default eta and scaler functions if they are not gievn in the params
         self.scaler_fn = None
         self.diff_density = lambda _x, _u : 1.0
@@ -266,7 +352,9 @@ class ControlledSDE(hk.Module):
         # Extract the indexes of the outputs that contribute to the noise (if not given, all outputs contribute)
         self.noise_outputs = jnp.array(self.params['diffusion_density_nn'].get('indx_noise_out', jnp.arange(self.n_x)))
 
-        # Define the function that concatenates the state and control input if needed for the density NN
+        # [TODO, Franck] Check if the noise_inputs matches the size of the reduced state
+
+        # Define the function that concatenates the relevant state and control input if needed for the density NN
         self.noise_relevant_state = lambda _x : self.reduced_state(_x)[self.noise_inputs] if self.noise_inputs.shape[0] < self.n_x else self.reduced_state(_x)
         self.noise_aug_state_ctrl = lambda _x, _u : jnp.concatenate([self.noise_relevant_state(_x), _u], axis=-1) if self.params.get('control_dependent_noise', False) else self.noise_relevant_state(_x)
         self.noise_aug_output = lambda _z : jnp.ones(self.n_x).at[self.noise_outputs].set(_z) if self.noise_outputs.shape[0] < self.n_x else _z
@@ -275,11 +363,9 @@ class ControlledSDE(hk.Module):
         if 'scaler_nn' in self.params['diffusion_density_nn'] and self.params['diffusion_density_nn']['scaler_nn'].get('type', 'none') != 'none':
             scaler_type = self.params['diffusion_density_nn']['scaler_nn'].get('type', 'scaler')
             init_value = self.params['diffusion_density_nn']['scaler_nn'].get('init_value', 0.001)
+            # This scaler return either a vector (a,b) where a and b are of size noise_outputs.shape[0] and represent the
+            # the offset and the scale of the density term on each axis.
             if scaler_type == 'scaler':
-                # The choice of sigmoid is to make sure that the scaler is always between 0 and 1
-                # The choice of +7.0 is to make sure that regularization (params close to 0) provides a value close to 1
-                # self.diff_scaler = lambda _x, _u: self.noise_aug_output(jax.nn.sigmoid(hk.get_parameter('scaler', shape=self.noise_outputs.shape, 
-                #                                     init = hk.initializers.RandomUniform(-init_value, init_value)) + 7.0 ))
                 self.scaler_fn =  lambda _ : hk.get_parameter('scaler', shape=(self.noise_outputs.shape[0]*2,), 
                                                     init = hk.initializers.RandomUniform(-init_value, init_value))
             elif scaler_type == 'nn':
@@ -288,7 +374,6 @@ class ControlledSDE(hk.Module):
                                     activation = getattr(jnp, _act_fn) if hasattr(jnp, _act_fn) else getattr(jax.nn, _act_fn),
                                     w_init=hk.initializers.RandomUniform(-init_value, init_value),
                                     name = 'scaler')
-                # self.diff_scaler = lambda _x, _u : self.noise_aug_output(jax.nn.sigmoid(self.scaler_net(self.noise_aug_state_ctrl(_x, _u)) + 7.0))
             else:
                 raise ValueError('The scaler type should be either scaler or nn')
         
@@ -300,33 +385,55 @@ class ControlledSDE(hk.Module):
                                     activation = getattr(jnp, _act_fn) if hasattr(jnp, _act_fn) else getattr(jax.nn, _act_fn),
                                     w_init=hk.initializers.RandomUniform(-init_value, init_value),
                                     name = 'density')
+            
             # The choice of sigmoid is to make sure that the density is always between 0 and 1
             # The choice of -7.0 is to make sure that regularization (params close to 0) provides a value close to 0
+            # The regularization of the parameters defining the density network
             self.density_function = lambda xu_red: jax.nn.sigmoid((self.density_net(xu_red)[0] - 7.0))
-            # Extract aggressiveness coefficient
+            
+            # Extract aggressiveness coefficient for the case of linear redistribution of the density terms to form the noise
             aggr = self.params['diffusion_density_nn']['density_nn'].get('aggressiveness', 1.0)
 
             # Create the diff_density function
             def __diff_density(_x, _u):
+
+                # Augment the control and state if needed
                 _xu_red = self.noise_aug_state_ctrl(_x, _u)
+
+                # Estimate the density network which is unscaled
                 _density = self.density_net(_xu_red)[0]
+
+                # If the way to distribute the noise to each state is learned, we obtain the coefficients and offset
                 if self.scaler_fn is not None:
-                    # 1e-7 is to make sure that the scaler is close to 0 when the density is close to 0
+                    # 1e-7 is to make sure that the scaler is close to 0 when the parameters are close to 0
+                    # We make sure that the scaler is always positive to ensure increasing noise with the density
                     _scaler_val = jnp.exp(self.scaler_fn(_xu_red)) * 1e-7
                     scaler_coeff, scaler_offset = _scaler_val[:self.noise_outputs.shape[0]], _scaler_val[self.noise_outputs.shape[0]:]
                 else:
                     scaler_coeff, scaler_offset = 0.0, 0.0
+
+                # The final noise withour prior is given by:
+                # Sigmoid ( _density -7.0  + _ scaler_coeff * _density + scaler_offset)
+                # The +7.0 enforce that the density is close to 0 when the density network is close to 0
+                # We can clearly see how the scaler_coeff and scaler_offset are learned and used to redistribute the noise
+                
+                # [TODO, Franck] Include other sort of noise here based on the paper description. 
+                # Our experiments work well with this noise
                 return jax.nn.sigmoid((aggr + scaler_coeff) * _density - 7.0 + scaler_offset)
             
+            # Utilities function to access 
+            # a) The rescaled noise function
+            # b) The actual neural network in the density estimation  without the scaler or the sigmoid
+            # c) or the density function with sigmoid but without the scaler
             self.diff_density = lambda _x, _u : self.noise_aug_output(__diff_density(_x, _u))
             self.density_function_v2 =  lambda _x, _u : self.density_net(self.noise_aug_state_ctrl(_x, _u))[0]
             self.density_function_v1 =  lambda _x, _u : self.density_function(self.noise_aug_state_ctrl(_x, _u))
 
     
     def diffusion(self, x, u, extra_args=None):
-        """ This function defines the diffusion term of the SDE model to learn.
-            It is a function of the prior diffusion, the density distribution of the latent space
-
+        """ This function defines the total diffusion term of the SDE model to learn.
+            It is a function of the user-defined, prior diffusion, 
+            and the distance-aware, rescaled density distribution
         Args:
             x (TYPE): The current state of the system (aka latent state)
             u (TYPE, optional): The current control signal applied to the system
@@ -339,17 +446,20 @@ class ControlledSDE(hk.Module):
     
 
     def init_encoder(self):
-        """ Define a function to encode from the current observation to the
-            latent space. This function should be accessed by a call to self.obs2state. Besides, self.obs2state is a function with the following prototype
-            obs2state and state2obs are functions that are already vectorized -> can take 1d or 2d arrays
+        """ Define a function to encode from the current observation to the latent space. 
+
+            This function should be accessed by a call to self.obs2state. Besides, self.obs2state is a function with the following prototype
+            obs2state and state2obs are functions that are already vectorized -> can take 1d or 2d arrays.
             self.obs2state = lambda obs, randval: latent var
             self.state2obs = lambda latentvar, randval: obs
+
+            This is a user-defined function that should be defined in the child class, if it needs custom behavior
         """
         self.obs2state = self.identity_obs2state
         self.state2obs = self.identity_state2obs
     
     def normal_dist_compute(self, y, rng, mean_fn, noise_fn):
-        """ Compute a Gaussian estimate given a mean and standard deviation function
+        """ Compute a Gaussian estimate given a mean and standard deviation function.
         """
         x_mean = mean_fn(y)
         x_sigma = noise_fn(y)
@@ -359,7 +469,7 @@ class ControlledSDE(hk.Module):
 
     def normal_obs2state(self, y, rng, mean_fn, noise_fn):
         """Return an estimated latent state based on a normal distribution
-        with mean_fn and standard deviation given by noise_fn
+        with mean_fn and standard deviation given by noise_fn.
 
         Args:
             y (TYPE): The current observation of the system
@@ -374,7 +484,7 @@ class ControlledSDE(hk.Module):
     
     def normal_state2obs(self, x, rng, mean_fn, noise_fn):
         """Return an estimated observation based on a normal distribution
-        with mean_fn and standard deviation given by noise_fn
+        with mean_fn and standard deviation given by noise_fn.
 
         Args:
             x (TYPE): The current state of the system
@@ -389,18 +499,41 @@ class ControlledSDE(hk.Module):
 
     def identity_obs2state(self, y, rng=None):
         """ Return the identity fuction when the observation is exactly the
-            state of the system
+            state of the system.
+        
+        Args:
+            y (TYPE): The current observation of the system
+            rng (None, optional): A random number generator key
+
+        Returns:
+            TYPE: The estimated state x given the observation y
         """
         return y
     
     def identity_state2obs(self, x, rng=None):
         """ Return the identity fuction when the observation is exactly the
-            state of the system
+            state of the system.
+
+        Args:
+            x (TYPE): The current state of the system
+            rng (None, optional): A random number generator key
+
+        Returns:
+            TYPE: The estimated observation y given the state x
         """
         return x
 
     def state_transform_for_loss(self, x):
-        """ A function to transform the state for loss computation
+        """ A function to transform the state for loss computation.
+            E.g., if the state contains an angle, 
+            maybe for loss computation its better to use sin and cos of the angle.
+            This function returns the transformed state that is being used in the morm 2 loss
+
+        Args:
+            x (TYPE): The current state of the system
+
+        Returns:
+            TYPE: The transformed state of the system
         """
         return x
     
@@ -411,13 +544,16 @@ class ControlledSDE(hk.Module):
             y0 (TYPE): The observation of the system at time at initial time
             uVal (TYPE): The control signal applied to the system. This could be an array or a function of observation
             rng (TYPE): A random number generator key
-            extra_scan_args (None, optional): Extra arguments to be passed to the scan function and the drift and diffusion functions
+            extra_scan_args (None, optional): Extra arguments to be passed to the scan function and principally the drift and diffusion functions
+
+        Returns:
+
         """
         return self.sample_general((self.obs2state, self.state2obs), self.compositional_drift, self.diffusion, y0, uVal, rng, extra_scan_args)
 
     def sample_general(self, obs2state_fns, drift_term, diff_term, y0, uVal, rng_brownian, extra_scan_args=None):
         """A general function for sampling from a drift fn and a diffusion fn
-        given times at which to sample solutions and control values to be applied
+        given times at which to sample solutions and control values to be applied at these times.
 
         Args:
             obs2state_fns (TYPE): A tuple of functions to convert observations to states and vice versa
@@ -429,11 +565,14 @@ class ControlledSDE(hk.Module):
             extra_scan_args (None, optional): Extra arguments to be passed to the scan function and the drift and diffusion functions
         
         Returns:
-            TYPE: A tuple of arrays containing the sampled states, observations and the control applied
+            array: 2D array of shape (horizon+1, n_x) containing the sampled state trajectory
+            array: 2D array of shape (horizon+1, n_y) containing the sampled observation trajectory
+            array: 2D array of shape (horizon, n_u) containing the control input applied at each time step
         """
 
-        # Finally solve the stochastic differential equation
+        # When the system is being initialized, we just need to run the functions once to initialize the parameters
         if hk.running_init():
+            #[TODO, Franck] This assumes the u is given as a 2D or 1D array, not a function of the observation
             # Dummy return in this case -> This case is just to initialize NNs
             # Initialize the obs2state and state2obs parameters
             x0 = obs2state_fns[0](y0, rng_brownian)
@@ -442,9 +581,6 @@ class ControlledSDE(hk.Module):
             _ = drift_term(x0, uVal if uVal.ndim ==1 else uVal[0], extra_scan_args)
             _ = diff_term(x0, uVal if uVal.ndim ==1 else uVal[0], extra_scan_args)
 
-            #[TODO Franck] Maybe make the return type to be the same after sde_solve
-            #Fine if the returned types are different at initilization
-            # 2D array to be similar with sde_solve
             return jnp.zeros((self.params['horizon']+1, self.n_x)), jnp.zeros((self.params['horizon']+1, self.n_y)), jnp.zeros((self.params['horizon'], self.n_u))
         else:
             # Solve the sde and return its output (latent space)
@@ -455,27 +591,28 @@ class ControlledSDE(hk.Module):
                     )
     
     def density_loss(self, y, u, rng, mu_coeff_fn):
-        """ Given an observation, control, and a random number generator key,
-            This function computes the following terms that define the loss on the density function:
+        """ Given an observation, control, a random number generator key, and the function to compute strong convexity coefficient at (x,u),
+            this function computes the following terms that define the loss on the density function and that incorporates distance awareness:
                 1. The observation y is converted to a state x
                 2. x and u are combined [x,u] then reduced to the relevant components as defined by noise_aug_state_ctrl
                 3. The reduced state and control are passed to density_function to compute both the density and its gradient
                 4. Now, params['density_loss'] contains 4 keys: ball_radius, mu_coeff, learn_mucoeff, ball_nsamples
-                    a. ball_radius: The radius of the ball around the observation [y,u] where we sample points to enforce local density/ strong convexity
-                    b. mu_coeff: The coefficient of the strong convexity term
-                    c. learn_mucoeff: If True, then mu_coeff is a learnable parameter that will be optimized and initialize with the value in mu_coeff
-                    d. ball_nsamples: The number of points to sample from the ball to enforce the strong convexity term
-                5. We generate a ball of radius ball_radius around [y,u] and sample ball_nsamples points from it
+                    a. ball_radius: The radius of the ball around the observation [x,u] where we sample points to enforce local density/ strong convexity
+                    b. ball_nsamples: The number of points to sample from the ball to enforce the strong convexity term
+                5. We generate a ball of radius ball_radius around [x,u] and sample ball_nsamples points from it
                 6. We compute the density at each of the sampled points
             
             Args:
                 y (TYPE): The observation of the system
                 u (TYPE): The control signal applied to the system
                 rng (TYPE): A random number generator key
+                mu_coeff_fn (TYPE): A function that returns the local strong convexity coefficient at (x,u)
 
             Returns:
                 TYPE: The gradient norm
                 TYPE: the strong convexity loss
+                TYPE: The density vector at (x,u)
+                TYPE: The local coefficient of strong convexity at (x,u)
         """
 
         # Split the random number generator into a key for observation to state conversion and a key for sampling the ball
@@ -506,77 +643,13 @@ class ControlledSDE(hk.Module):
 
         # Compute the strong convexity loss given mu_coeff
         sconvex_cond = den_xball - den_xu - jnp.sum(grad_den_xu[None] * ball_dist, axis=1) - 0.5 * mu_coeff * jnp.sum(jnp.square(ball_dist), axis=1)
-        # sconvex_cond = den_xball - den_xu - 0.5 * mu_coeff * jnp.sum(jnp.square(ball_dist), axis=1)
-        
         sconvex_loss = jnp.sum(jnp.square(jnp.minimum(sconvex_cond, 0)))
-        # sconvex_loss = jnp.sum(jnp.square(sconvex_cond)) # [TODO Franck] Check if this is better than summing
 
         return jnp.sum(jnp.square(grad_den_xu)), sconvex_loss, den_xu, mu_coeff
-
-    # def density_loss_theory(self, y, u, rng, mu_coeff_fn):
-    #     """ Given an observation, control, and a random number generator key,
-    #         This function computes the following terms that define the loss on the density function:
-    #             1. The observation y is converted to a state x
-    #             2. x and u are combined [x,u] then reduced to the relevant components as defined by noise_aug_state_ctrl
-    #             3. The reduced state and control are passed to density_function to compute both the density and its gradient
-    #             4. Now, params['density_loss'] contains 4 keys: ball_radius, mu_coeff, learn_mucoeff, ball_nsamples
-    #                 a. ball_radius: The radius of the ball around the observation [y,u] where we sample points to enforce local density/ strong convexity
-    #                 b. mu_coeff: The coefficient of the strong convexity term
-    #                 c. learn_mucoeff: If True, then mu_coeff is a learnable parameter that will be optimized and initialize with the value in mu_coeff
-    #                 d. ball_nsamples: The number of points to sample from the ball to enforce the strong convexity term
-    #             5. We generate a ball of radius ball_radius around [y,u] and sample ball_nsamples points from it
-    #             6. We compute the density at each of the sampled points
-            
-    #         Args:
-    #             y (TYPE): The observation of the system
-    #             u (TYPE): The control signal applied to the system
-    #             rng (TYPE): A random number generator key
-
-    #         Returns:
-    #             TYPE: The gradient norm
-    #             TYPE: the strong convexity loss
-    #     """
-
-    #     # Split the random number generator into a key for observation to state conversion and a key for sampling the ball
-    #     rng_obs2state, rng_ball = jax.random.split(rng)
-
-    #     # Convert the observation to a state
-    #     x = self.obs2state(y, rng_obs2state)
-
-    #     # Combine the state and the control
-    #     xu_red = self.noise_aug_state_ctrl(x, u)
-
-    #     # Compute the density and its gradient
-    #     den_xu, grad_den_xu = jax.value_and_grad(self.density_function)(xu_red)
-
-    #     # Check if the ball_radius is an array or a scalar
-    #     # [TODO] Make the radius to be a proportion of the magnitude of the state
-    #     radius = jnp.array(self.params['density_loss']['ball_radius'])
-    #     if radius.ndim > 0:
-    #         assert radius.shape == xu_red.shape, "The ball_radius should be a scalar or an array of size xu_red.shape[0]"
-
-    #     # Sample ball_nsamples points from the ball of radius ball_radius around xu_red
-    #     ball_dist = jax.random.normal(rng_ball, (self.params['density_loss']['ball_nsamples'], xu_red.shape[0])) * radius[None]
-    #     xball = xu_red[None] + ball_dist
-
-    #     # Compute the density and its gradient at each of the sampled points
-    #     den_xball = jax.vmap(self.density_function)(xball)
-    #     mu_coeff = mu_coeff_fn(xu_red)
-
-    #     # Compute the strong convexity loss given mu_coeff
-    #     den_local_conv = den_xu + 0.5 * mu_coeff * jnp.sum(jnp.square(ball_dist), axis=1)
-    #     # sconvex_loss = jnp.sum(jnp.square(den_local_conv - den_xball))
-    #     sconvex_loss = jnp.sum( jnp.where(den_xball < den_local_conv, 1.0, 0.0) * jnp.square(den_local_conv - den_xball) )
-
-    #     # # Norm gradient cost
-    #     # actual_grad = mu_coeff * ball_dist[0]
-    #     # _, grad_xball = jax.value_and_grad(self.density_function)(xball[0])
-    #     # grad_norm_val = jnp.sum(jnp.square(grad_xball - actual_grad)) + jnp.sum(jnp.square(grad_den_xu))
-    #     grad_norm_val = jnp.sum(jnp.square(grad_den_xu))
-    #     return grad_norm_val, sconvex_loss, den_xu, mu_coeff
+    
 
     def mu_coeff_nn(self, aug_xu):
-        """ This function returns the learned local quadratic coefficient of the density function
+        """ This function returns the learned local quadratic/strong convexity coefficient of the density function
         Args:
             aug_xu (TYPE): The augmented state and control vector
         
@@ -584,8 +657,10 @@ class ControlledSDE(hk.Module):
             TYPE: A vector of the same size as the state vector (latent space)
         """
         type_mu = self.params['density_loss']['learn_mucoeff']['type']
+        # If the strong convexity coefficient is constant, return the value stored in density_loss
         if type_mu == 'constant':
             return self.params['density_loss']['mu_coeff']
+        # If the strong convexity coefficient is global, it is constant and the constant is being learned
         elif type_mu == 'global':
             return self.params['density_loss']['mu_coeff'] * jnp.exp(hk.get_parameter('mu_coeff', shape=(), init=hk.initializers.RandomUniform(-0.001, 0.001)))
 
@@ -596,11 +671,14 @@ class ControlledSDE(hk.Module):
                                     activation = getattr(jnp, _act_fn) if hasattr(jnp, _act_fn) else getattr(jax.nn, _act_fn),
                                     w_init=hk.initializers.RandomUniform(-_init_value, _init_value),
                                     name = 'mu_coeff')
+        
+        # We make sure that the output is positive and we multiply it by the initial value
         return jnp.exp(mu_net(aug_xu)[0]) * self.params['density_loss']['mu_coeff']
 
 
     def sample_for_loss_computation(self, ymeas, uVal, rng, extra_scan_args=None):
-        """ Sample the SDE and compute the loss between the estimated and the measured observation
+        """ Sample the SDE and compute the loss between the estimated and the measured observation.
+            This function is usually the objective to fit the SDE to the data.
 
         Args:
             ymeas (TYPE): The measured observation of the system
@@ -614,10 +692,14 @@ class ControlledSDE(hk.Module):
             TYPE: A dictionary containing extra information about the loss
         """
 
-        # Check if the trajectory horizon matches
+        # Check if the trajectory horizon matches the number of control inputs
         assert ymeas.shape[0] == uVal.shape[0]+1, 'Trajectory horizon must match'
+
+        # Extract the number of integration steps to between two control inputs and measurements
+        # This is greater than 1, in the case where the time step in the dataset is finer than the time step used for the integration
+        # Typically, in MPC, we want shorter look-ahead horizons with longer time steps
         num_steps2data = self.params['num_steps2data']
-        assert  self.params['horizon'] * num_steps2data == uVal.shape[0], 'Trajectory horizon must match'
+        assert  self.params['horizon'] * num_steps2data == uVal.shape[0], 'Trajectory horizon and num_steps2data must match the number of control inputs'
 
         # Split the random number generator
         rng_brownian, rng_sample2consider, rng_density = jax.random.split(rng, 3)
@@ -625,54 +707,58 @@ class ControlledSDE(hk.Module):
         # uval is size (horizon * num_steps2data, num_ctrl), lets reshape it to (horizon, num_steps2data, num_ctrl)
         u_values = uVal.reshape((self.params['horizon'], num_steps2data, self.params['n_u']))
 
-        # extra_scan_args is a tuple of arguments when not None, we also need to reshape it
+        # extra_scan_args is a tuple of arguments to pass the the integration scheme when not None.
+        # We also need to reshape it so that it is of size (horizon, num_steps2data,)
         if extra_scan_args is not None:
-            # We will take only the first element for now because some type issues etc...
-            extra_scan_args = tuple([arg.reshape((self.params['horizon'], num_steps2data))[:,0] for arg in extra_scan_args])
+            assert isinstance(extra_scan_args, tuple), 'extra_scan_args must be a tuple of arrays'
+            # Now reshape the extra_scan_args depending on the number of arguments
+            extra_scan_args = tuple([
+                arg.reshape((self.params['horizon'], num_steps2data)) if arg.ndim == 1 else \
+                arg.reshape((self.params['horizon'], num_steps2data, *arg.shape[1:])) \
+                for arg in extra_scan_args
+            ])
 
-        # Let's get the actual y_values
+        # Let's get the actual y_values to fit the SDE to
         y_values = ymeas[::num_steps2data]
+
+        #[TODO, Franck] More documentation on this
         # How do we pick u_values? Different strategies stored in params['u_sampling_strategy']
         # By default we pick the first control value, i.e. u_values[:,0,:]
-        # Another strategie is the mean of all the control values, i.e. u_values.mean(axis=1)
-        # Another strategie is the median of all the control values, i.e. jnp.median(u_values, axis=1)
-        # Another strategie is a random control value
+        # Another strategy is the mean of all the control values, i.e. u_values.mean(axis=1)
+        # Another strategy is the median of all the control values, i.e. jnp.median(u_values, axis=1)
+        # Another strategy is a random control value
         u_sampling_strategy = self.params.get('u_sampling_strategy', 'first')
-        if u_sampling_strategy == 'first':
-            u_values = u_values[:,0,:]
-        elif u_sampling_strategy == 'mean':
-            u_values = u_values.mean(axis=1)
-        elif u_sampling_strategy == 'median':
-            u_values = jnp.median(u_values, axis=1)
-        elif u_sampling_strategy == 'random':
-            rng_density, rng_u = jax.random.split(rng_density)
-            rnd_indx = jax.random.randint(rng_u, shape=(self.params['horizon'],), minval=0, maxval=num_steps2data)
-            u_values = u_values[jnp.arange(self.params['horizon']), rnd_indx, :]
-        else:
-            raise ValueError('Unknown u_sampling_strategy: {}. Choose from first, mean, median, random'.format(u_sampling_strategy))
+        u_values = sampling_strat_under_dataset_with_finer_steps(u_values, u_sampling_strategy, rng_sample2consider)
+        if extra_scan_args is not None:
+            extra_scan_args = tuple([
+                sampling_strat_under_dataset_with_finer_steps(arg, u_sampling_strategy, rng_sample2consider) \
+                for arg in extra_scan_args
+            ])
 
         # Solve the SDE to obtain state and observation evolution
         y0 = y_values[0]
-        _, ynext, _ = self.sample_sde(y0, u_values, rng_brownian, extra_scan_args)
+        _xnext, ynext, _ = self.sample_sde(y0, u_values, rng_brownian, extra_scan_args)
 
-        # Extract the state (ignore the initial state) and the KL divergence
+        # Extract the state (ignore the initial state) used for loss computation
         ynext, meas_y = ynext[1:], y_values[1:]
+        _xnext = _xnext[1:]
 
-        # Get indexes of the samples to consider in the norm 2 computation between the estimated and the measured observation
-        # This essentially make the fitting similar to a time series with irregular sampling
+        # Get indexes of the samples to consider in the logprob computation between the estimated and the measured observation
+        # This essentially makes the fitting similar to a time series with irregular sampling and help with generalization
         _indx = None
         if 'num_sample2consider' in self.params:
-            # rng_sample2consider = jnp.array([0, 0], dtype=jnp.uint32)
             if self.params['num_sample2consider'] < ynext.shape[0]:
                 _indx = jax.random.choice(rng_sample2consider, ynext.shape[0], 
                             shape=(self.params['num_sample2consider'],), replace=False)
                 # Restrain the time indexes to be considered
                 ynext = ynext[_indx]
                 meas_y = meas_y[_indx]
+                _xnext = _xnext[_indx]
 
         # Compute the error between the estimated and the measured observation
         # We sum the error over the integration horizon and then average over the number of coordinates
         # _error_data = jnp.mean(jnp.sum(jnp.square(meas_y-ynext), axis=0))
+        # meas_y_trans
         _error_data = jnp.sum(jnp.square((self.state_transform_for_loss(meas_y)-self.state_transform_for_loss(ynext)) / jnp.array(self.params.get('obs_weights', 1.0))))
 
         # Extra values to print or to penalize the loss function on
@@ -1186,6 +1272,8 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
             rng (TYPE): A random number generator
             extra_args (None, optional): Extra arguments to pass to the sampling function
         """
+        # TODO: This function is almost the same as loss_fn. We should merge them Or reuse what is already computed
+
         # CHeck if rng is given as  a ingle key
         assert rng.ndim == 1, 'THe rng key is splitted inside the loss function computation'
 
@@ -1245,7 +1333,6 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
     
     return nn_params, loss_fn, nonneg_projection, test_fn
 
-
 def create_online_cost_sampling_fn(params_model,
                             params_mpc,
                             sde_constr= ControlledSDE,
@@ -1254,15 +1341,15 @@ def create_online_cost_sampling_fn(params_model,
     """Create a function that integrate the dynamics as well as a cost function to minimize.
        Typically, the cost function is the objective used in the underlying MPC problem
 
-    Args:
-        params_model (TYPE): The SDE solver parameters and model parameters
-        cost_fn (TYPE): The cost function to optimize on the fly in a stochastic MPC manner
-        terminal_cost (None, optional): The terminal cost, if available
-        sde_constr (TYPE): A class constructor that is child of ControlledSDE class
-        seed (int, optional): A value to initialize the parameters of the model
+        Args:
+            params_model (TYPE): The model parameters to use as the dynamics in the MPC problem
+            params_mpc (TYPE): The parameters of the MPC problem; typically optimization parameters
+            sde_constr (TYPE): A child of ControlledSDE class, that represents the physics-constrained SDE model
+            seed (int, optional): A seed to initialize the parameters of the model
+            extra_args_sde_constr (TYPE): Extra arguments to pass to the constructor of the SDE model and the cost function
 
-    Returns:
-        TYPE: Description
+        Returns:
+            TYPE: Description
     """
     # Random ky for initialization
     rng_zero = jax.random.PRNGKey(seed)
@@ -1273,33 +1360,35 @@ def create_online_cost_sampling_fn(params_model,
     # Initialization of the observation and uzero
     yzero = jnp.zeros((params_model['n_y'],))
 
-    # A zero-cost function for initializating the cost sampling function
-    _cost_fn_zero = lambda _x, _u, _extra_args : jnp.array(0.)
+    # # A zero-cost function for initializating the cost sampling haiku model
+    # _cost_fn_zero = lambda _x, _u, _extra_args : jnp.array(0.)
 
+    # Number of particles to use when sampling the SDE
     num_sample = params_mpc.get('num_particles', params_model.get('num_particles', 1) )
     params_model['num_particles'] = num_sample
     # Print the number of particles used for the loss
     print('Using [ N = {} ] particles for the loss'.format(num_sample))
 
-    # Get the horizon from params_loss
+    # Get the horizon from horizon in the mpc params dictionary
     params_model['horizon'] = params_mpc.get('horizon', params_model.get('horizon', 1))
     # Print the horizon used for the loss
     print('Using [ T = {} ] horizon for the loss'.format(params_model['horizon']))
 
-    # Let set up the number of short time steps
+    # Let set up the number of short time steps if present
     params_model['num_short_dt'] = params_mpc['num_short_dt']
     params_model['short_step_dt'] = params_mpc['short_step_dt']
     params_model['long_step_dt'] = params_mpc['long_step_dt']
 
     # Define the time steps used during integration
     time_steps = compute_timesteps(params_model)
-    # params_model['time_steps'] = time_steps
 
+    # Initialize the problem constraints from the MPC parameters
+    # This infers bound constraints on the control and state variables
     (has_ubound, input_lb, input_ub),\
         (has_xbound, slack_proximal, state_idx, penalty_coeff, state_lb, state_ub, weight_constr, slack_scaling) = \
             initialize_problem_constraints(params_model['n_x'], params_model['n_u'], params_mpc)
 
-    # Transform the penalty coefficient into an array
+    # Transform the penalty coefficient into an array -> penalty to apply for constraint violation
     penalty_coeff = jnp.array(penalty_coeff) if penalty_coeff is not None else penalty_coeff
 
     # Define the cost of penalizing the constraints using a nonsmooth function and penalty method
@@ -1312,12 +1401,15 @@ def create_online_cost_sampling_fn(params_model,
         diff_x = jnp.concatenate((x - state_ub, state_lb - x))
         _penalty_coeff = jnp.concatenate((penalty_coeff, penalty_coeff))
         #[TODO Franck] Maybe mean/sum the error instead of doing a mean over states
+        # weight_constr is a scalar value that is used to scale the constraint cost relative to the actual cost
         return jnp.sum(jnp.where( diff_x > 0, 1., 0.) * jnp.square(diff_x) * _penalty_coeff) * weight_constr
 
     # The cost of penalizing the constraints using a smooth function and proximal method
     def constr_cost_withprox(x_true, slack_x):
         """ With proximal constraint on the slack variable -> smooth norm 2 regularization
         """
+        # The slack variable may be scaled using slack_scaling, simply for stability of the optimization
+        # Default is slack_scaling = 1.0
         diff_state = x_true[state_idx] - slack_x * slack_scaling
         return jnp.sum(jnp.square(diff_state) * penalty_coeff) * weight_constr
 
@@ -1372,43 +1464,62 @@ def create_online_cost_sampling_fn(params_model,
         pen_cost = constr_cost(_x, _slack)
         return actual_cost + pen_cost
 
-    # Define the function to integrate the cost function and the dynamics
-    def sample_sde(y, opt_params, rng, _cost_fn, _terminal_cost=None, extra_dyn_args=None, extra_cost_args=None):
+    # Define the transform for the sampling function
+    def sample_sde(y, u, rng, extra_args=None):
+        """ Sampling function """
+        m_model = sde_constr(params_model, **extra_args_sde_constr)
+        # xevol, yevol, uevol
+        return m_model.sample_sde(y, u, rng, extra_args)
+    
+    # Transform the function into a pure one
+    # Non-zero initialization for gradient descent to work properly for the control inputs
+    zero_u = jnp.ones((params_model['horizon'], n_u)) * 1e-4
+    sampling_pure =  hk.without_apply_rng(hk.transform(sample_sde))
+    nn_params = sampling_pure.init(rng_zero, yzero, zero_u, rng_zero)
 
-        # Do some check
+    def compute_cost_function(sde_params, y, opt_params, rng, _cost_fn,
+                              _terminal_cost=None, extra_dyn_args=None, 
+                              extra_cost_args=None,
+                              extra_cost_terminal_args=None
+                            ):
+        """ Compute the cost function for a given set of parameters
+        """
         assert opt_params.ndim == 2, 'The parameters must be a two dimension array'
         if has_slack:
             assert opt_params.shape[1] == opt_params_size, 'Shape of the opt params do not match'
         else:
             assert opt_params.shape[1] == n_u, 'Shape of the opt params do not match'
 
-        # Build the SDE solver
-        m_model = sde_constr(params_model, **extra_args_sde_constr)
+        # Solve the SDE and find the trajectories
+        useq_val = opt_params[:,:n_u]
+        xevol, _, _ = sampling_pure.apply(sde_params, y, useq_val, rng, extra_args=extra_dyn_args)
 
-        # Compute the evolution of the state
-        _aug_cost_fn = lambda x, u, slack, _extra_args: aug_cost_fn(x, u, slack, _cost_fn, _extra_args)
-        x_evol = m_model.sample_dynamics_with_cost(y, opt_params, rng, _aug_cost_fn, state_idx,
-                            extra_dyn_args=extra_dyn_args, extra_cost_args=extra_cost_args)
+        # Extract slack variables if there are nay
+        slack_val = opt_params[:,n_u:] if has_slack else None
 
         # Evaluate the cost_to_go function
-        # [TODO Franck] probably a bug here when using ts.shape-1 optimization variable
-        # When has_slack should have ts.shape opt variable so that the slack
-        # matches the end state/final state
-        end_cost = _terminal_cost(x_evol[-1,:-1]) if _terminal_cost is not None else jnp.array(0.)
-        if constr_cost is not  None:
-            pen_cost = constr_cost(x_evol[-1,:-1], opt_params[0, n_u:] if has_slack else None)
-        else:
-            pen_cost = jnp.array(0.)
-        # Compute the total cost by adding the terminal cost
-        total_cost = pen_cost*time_steps[-1] + params_mpc['discount']*end_cost + x_evol[-1,-1]
+        _aug_cost_fn = lambda x, u, slack, _extra_args: aug_cost_fn(x, u, slack, _cost_fn, _extra_args)
+        vmap_extra_args = 0 if extra_cost_args is not None else None
 
-        # Modified the cost to add the penalty with respect to constraints of the first state
-        # x0_constr = 0. if not has_xbound else constr_cost_noprox(x_evol[0,:-1]) * time_steps[0]
-        if has_xbound:
-            # Initial constraint cost -> This should be constant as the constr cost is only a function of the state
-            x_evol = x_evol.at[1:,-1].add(constr_cost_noprox(x_evol[0,:-1]) * time_steps[0])
+        useq_aug = jnp.concatenate((useq_val, useq_val[-1][None]), axis=0)
+        slack_val_aug = jnp.concatenate((xevol[0][state_idx][None], slack_val), axis=0) if has_slack else None
+        total_cost = jax.vmap(_aug_cost_fn, in_axes=(0,0,0,vmap_extra_args))(xevol, useq_aug, slack_val_aug, extra_cost_args)
+        # total_cost = jax.vmap(_aug_cost_fn, in_axes=(0,0,0,vmap_extra_args))(xevol[:-1], useq_val, slack_val, extra_cost_args)
+        # Trapezoidal rule for the cost
+        # cost_val = 0.5 * jnp.sum( time_steps[:-1] * (total_cost[1:] + total_cost[:-1]) )
+        cost_val_arr = jnp.cumsum(0.5 * time_steps * (total_cost[1:] + total_cost[:-1]))
+        cost_val = cost_val_arr[-1]
 
-        return total_cost, x_evol
+        # Terminal cost computation
+        end_cost = 0.0
+        if _terminal_cost is not None:
+            end_cost = _terminal_cost(xevol[-1], feat=extra_cost_terminal_args)
+
+        # Update xevol with running cost
+        # xevol = jnp.concatenate((xevol, cost_val_arr.reshape((-1,1))), axis=1)
+        xevol = jnp.concatenate((xevol, total_cost.reshape((-1,1))), axis=1)
+        
+        return cost_val + end_cost, xevol
 
     # Initialize an optimization parameters given a sequence of STATE x and u
     # [TODO Fanck] Define it in terms of observation and use the state to observation transformation to match the output
@@ -1456,16 +1567,17 @@ def create_online_cost_sampling_fn(params_model,
 
         assert False, 'This case is not handle...'
 
-    # Transform the function into a pure one
-    sampling_pure =  hk.without_apply_rng(hk.transform(sample_sde))
-    nn_params = sampling_pure.init(rng_zero, yzero, _construct_opt_params(), rng_zero, _cost_fn_zero)
-
     # Now define the n_sampling method
-    def multi_sampling(_nn_params, y, opt_params, rng, _cost_fn, _terminal_cost=None, extra_dyn_args=None, extra_cost_args=None):
+    def multi_sampling(_nn_params, y, opt_params, rng, _cost_fn, 
+                       _terminal_cost=None, extra_dyn_args=None, extra_cost_args=None,
+                       extra_cost_terminal_args=None
+                    ):
         assert rng.ndim == 1, 'RNG must be a single key for vmapping'
         m_rng = jax.random.split(rng, num_sample)
-        vmap_sampling = jax.vmap(sampling_pure.apply, in_axes=(None, None, None, 0, None, None, None, None))
-        total_loss, xtraj = vmap_sampling(_nn_params, y, opt_params, m_rng, _cost_fn, _terminal_cost, extra_dyn_args, extra_cost_args)
+        vmap_sampling = jax.vmap(compute_cost_function, in_axes=(None, None, None, 0, None, None, None, None, None))
+        total_loss, xtraj = vmap_sampling(_nn_params, y, opt_params, m_rng, _cost_fn, _terminal_cost, 
+                                          extra_dyn_args, extra_cost_args, extra_cost_terminal_args
+                                        )
         return jnp.mean(total_loss), xtraj
 
     # Vmapped the function such that it works
@@ -1473,124 +1585,246 @@ def create_online_cost_sampling_fn(params_model,
     vmapped_prox = None if proximal_fn is None else jax.vmap(proximal_fn)
 
     if vmapped_prox is not None:
-        construct_opt_params = lambda u=None, x=None: vmapped_prox(_construct_opt_params(u,x))
+        construct_opt_params = lambda u=None, x=None: vmapped_prox(_construct_opt_params(u, x))
     else:
         construct_opt_params = _construct_opt_params
 
     return nn_params, multi_sampling, vmapped_prox, constr_cost, construct_opt_params
 
+########################## Update MPC cost function above ############################
+# OLD function used for MPC control in the paper.
+# def create_online_cost_sampling_fn(params_model,
+#                             params_mpc,
+#                             sde_constr= ControlledSDE,
+#                             seed=0,
+#                             **extra_args_sde_constr):
+#     """Create a function that integrate the dynamics as well as a cost function to minimize.
+#        Typically, the cost function is the objective used in the underlying MPC problem
 
-# Utility class for value and policy functions learning
-class ValuePolicy(hk.Module):
-    """ Define functions for value and policy parameterization and evaluation
-    """
-    def __init__(self, params, name=None):
-        super().__init__(name)
-        # Store the parameters
-        self.params = params
+#         Args:
+#             params_model (TYPE): The model parameters to use as the dynamics in the MPC problem
+#             params_mpc (TYPE): The parameters of the MPC problem; typically optimization parameters
+#             sde_constr (TYPE): A child of ControlledSDE class, that represents the physics-constrained SDE model
+#             seed (int, optional): A seed to initialize the parameters of the model
+#             extra_args_sde_constr (TYPE): Extra arguments to pass to the constructor of the SDE model and the cost function
 
-        # Initialize the value
-        #  function
-        self.value_nn_init()
+#         Returns:
+#             TYPE: Description
+#     """
+#     # Random ky for initialization
+#     rng_zero = jax.random.PRNGKey(seed)
 
-        # Initialize the policy function
-        self.policy_nn_init()
+#     # Number of control inputs
+#     n_u = params_model['n_u']
 
-        # Check if functions for the value and policy evaluation are defined
-        assert hasattr(self, 'value_fn'), 'Value function not defined'
-        assert hasattr(self, 'policy_fn'), 'Policy function not defined'
+#     # Initialization of the observation and uzero
+#     yzero = jnp.zeros((params_model['n_y'],))
 
-def create_value_n_policy_fn(model_params, value_policy_constr, seed=0):
-    """ Create the value and policy functions and initialize its parameter dictionary
-    """
-    # Initialization values for ValuePolicy
-    _x0 = jnp.zeros((model_params['n_x'],))
+#     # A zero-cost function for initializating the cost sampling haiku model
+#     _cost_fn_zero = lambda _x, _u, _extra_args : jnp.array(0.)
 
-    # Initialze rng key
-    rng_key = jax.random.PRNGKey(seed)
+#     # Number of particles to use when sampling the SDE
+#     num_sample = params_mpc.get('num_particles', params_model.get('num_particles', 1) )
+#     params_model['num_particles'] = num_sample
+#     # Print the number of particles used for the loss
+#     print('Using [ N = {} ] particles for the loss'.format(num_sample))
 
-    # Transform the function into a pure one
-    val_pure = hk.without_apply_rng(hk.transform(lambda x : value_policy_constr(model_params).value_fn(x)))
-    pol_pure = hk.without_apply_rng(hk.transform(lambda x : value_policy_constr(model_params).policy_fn(x)))
+#     # Get the horizon from horizon in the mpc params dictionary
+#     params_model['horizon'] = params_mpc.get('horizon', params_model.get('horizon', 1))
+#     # Print the horizon used for the loss
+#     print('Using [ T = {} ] horizon for the loss'.format(params_model['horizon']))
 
-    # Initialize the parameters
-    val_params = val_pure.init(rng_key, _x0)
-    pol_params = pol_pure.init(rng_key, _x0)
+#     # Let set up the number of short time steps if present
+#     params_model['num_short_dt'] = params_mpc['num_short_dt']
+#     params_model['short_step_dt'] = params_mpc['short_step_dt']
+#     params_model['long_step_dt'] = params_mpc['long_step_dt']
 
-    # Return the functions and their params
-    return (val_params, val_pure.apply), (pol_params, pol_pure.apply)
+#     # Define the time steps used during integration
+#     time_steps = compute_timesteps(params_model)
 
+#     (has_ubound, input_lb, input_ub),\
+#         (has_xbound, slack_proximal, state_idx, penalty_coeff, state_lb, state_ub, weight_constr, slack_scaling) = \
+#             initialize_problem_constraints(params_model['n_x'], params_model['n_u'], params_mpc)
 
-def create_valueNpolicy_loss_fn(model_params, loss_params, value_policy_constr, seed=0):
-    """ Create a function to compute the loss for the value and policy functions
-    """
-    (val_params, val_pure_fn), (pol_params, pol_pure_fn) = create_value_n_policy_fn(model_params, value_policy_constr, seed)
+#     # Transform the penalty coefficient into an array
+#     penalty_coeff = jnp.array(penalty_coeff) if penalty_coeff is not None else penalty_coeff
 
-    # Merged parameters
-    valpol_params = {'value': val_params, 'policy': pol_params}
-    valpol_pure = lambda _params, x : (val_pure_fn(_params['value'], x), pol_pure_fn(_params['policy'], x))
-    
-    # Define the loss function
-    def loss_fn(_params, x, u, target_value, opt_params, cost_opt=jnp.array(0.0)):
-        """ Compute the loss function for the value and policy functions
-        """
-        # Compute the value function
-        Vx, Pix = jax.vmap(valpol_pure, in_axes=(None, 0))(_params, x)
+#     # Define the cost of penalizing the constraints using a nonsmooth function and penalty method
+#     def constr_cost_noprox(x_true, slack_x=None):
+#         """ Penalty method with nonsmooth cost fuction.
+#             This should be avoided when doing nonlinear MPC using accelerated gradient descent
+#         """
+#         x = x_true[state_idx]
+#         # diff_x should always be less than 0
+#         diff_x = jnp.concatenate((x - state_ub, state_lb - x))
+#         _penalty_coeff = jnp.concatenate((penalty_coeff, penalty_coeff))
+#         #[TODO Franck] Maybe mean/sum the error instead of doing a mean over states
+#         return jnp.sum(jnp.where( diff_x > 0, 1., 0.) * jnp.square(diff_x) * _penalty_coeff) * weight_constr
 
-        # Compute the gradient of Vx
-        gradVx = jax.vmap(jax.grad(lambda _x : val_pure_fn(_params['value'], _x)), in_axes=0)(x)
-        gradVx_norm = jnp.mean(jnp.square(gradVx))
+#     # The cost of penalizing the constraints using a smooth function and proximal method
+#     def constr_cost_withprox(x_true, slack_x):
+#         """ With proximal constraint on the slack variable -> smooth norm 2 regularization
+#         """
+#         diff_state = x_true[state_idx] - slack_x * slack_scaling
+#         return jnp.sum(jnp.square(diff_state) * penalty_coeff) * weight_constr
 
-        # Error on the value function
-        ErrVx = jnp.mean(jnp.square(Vx - target_value))
-        # print(u.shape, Pix.shape, x.shape, Vx.shape, target_value.shape)
+#     # A function to constraint a vector between a given minimum and maximum values
+#     constr_vect = lambda a, a_lb, a_ub:  jnp.minimum(jnp.maximum(a, a_lb), a_ub)
 
-        # Error on the policy function
-        ErrPix = jnp.mean(jnp.square(Pix - u))
+#     # Now ready to define the constraint cost as well as the proximal operator if needed
+#     constr_cost = None
+#     proximal_fn = None
 
-        # Regularization parameters
-        w_loss_policy = jnp.sum(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(_params['policy'])]))
-        w_loss_value = jnp.sum(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(_params['value'])]))
+#     # Check if the problem has a state as slack variables
+#     has_slack = has_xbound and slack_proximal
+#     opt_params_size = n_u  + ( len(state_idx) if has_slack else 0)
 
-        # Regularization with respect to the optimal parameters
-        # w_loss_opt = jnp.array( [jnp.sum(jnp.square(p-q)) \
-        #                     for p, q in zip(jax.tree_util.tree_leaves(_params), jax.tree_util.tree_leaves(opt_params)) ]
-        #             )
-        w_loss_opt_val = jnp.array( [jnp.sum(jnp.square(p-q)) \
-                            for p, q in zip(jax.tree_util.tree_leaves(_params['value']), jax.tree_util.tree_leaves(opt_params['value'])) ]
-                    )
-        w_opt_val = jnp.sum(w_loss_opt_val) # jnp.sum(w_loss_opt)
+#     # In case bound on u are given but no bound on x -> No constraint cost
+#     # We known that the parameters of the opt is only based on control
+#     # So we constraint such parameters as lowered by input_lb and uppered by input_ub
+#     if has_ubound and (not has_xbound):
+#         proximal_fn = lambda u_slack: constr_vect(u_slack, input_lb, input_ub)
 
-        w_loss_opt_pol = jnp.array( [jnp.sum(jnp.square(p-q)) \
-                            for p, q in zip(jax.tree_util.tree_leaves(_params['policy']), jax.tree_util.tree_leaves(opt_params['policy'])) ]
-                    )
-        w_opt_pol = jnp.sum(w_loss_opt_pol) # jnp.sum(w_loss_opt)
-        
-        # Compute the total loss
-        total_error = loss_params['value_loss'] * ErrVx + loss_params['policy_loss'] * ErrPix 
+#     # No bound on u are given but x is constrained and we are using proximal operator
+#     # To constrain the slack variable associated with these states
+#     if (not has_ubound) and has_xbound and slack_proximal:
+#         constr_cost = constr_cost_withprox
+#         proximal_fn = lambda u_slack: jnp.concatenate((u_slack[:n_u], constr_vect(u_slack[n_u:], state_lb, state_ub)))
 
-        # + loss_params['policy_reg'] * w_loss_policy + loss_params['value_reg'] * w_loss_value
-        if 'policy_reg' in loss_params:
-            total_error += loss_params['policy_reg'] * w_loss_policy
-        
-        if 'value_reg' in loss_params:
-            total_error += loss_params['value_reg'] * w_loss_value
+#     # No bound on u is given but x is constrained. However, no slack variables
+#     # for proximal computation is given -> Nonsmooth penalization
+#     # IN this case, there is not proximal operator
+#     if (not has_ubound) and has_xbound and (not slack_proximal):
+#         constr_cost = constr_cost_noprox
 
-        if 'gradVx_reg' in loss_params:
-            total_error += loss_params['gradVx_reg'] * gradVx_norm
-        
-        if 'opt_val_dev' in loss_params:
-            total_error += loss_params['opt_val_dev'] * w_opt_val * cost_opt
-        
-        if 'opt_pol_dev' in loss_params:
-            total_error += loss_params['opt_pol_dev'] * w_opt_pol * cost_opt
+#     # We have a bound on u and bounds on x, but the bounds on x are enforced
+#     # as nonsmooth soft penalty cost
+#     if has_ubound and has_xbound and (not slack_proximal):
+#         constr_cost = constr_cost_noprox
+#         proximal_fn = lambda u_slack: constr_vect(u_slack, input_lb, input_ub)
 
-        # if weight_opt is not None:
-        #     weight_opt_val, weight_opt_pol = weight_opt
-        #     total_error += weight_opt_val * w_opt_val
-        #     total_error += weight_opt_pol * w_opt_pol
+#     if has_ubound and has_xbound and slack_proximal:
+#         constr_cost = constr_cost_withprox
+#         u_slack_lb = jnp.concatenate((input_lb, state_lb))
+#         u_slack_ub = jnp.concatenate((input_ub, state_ub))
+#         proximal_fn = lambda u_slack: constr_vect(u_slack, u_slack_lb, u_slack_ub)
 
-        return total_error, {'totalLoss': total_error, 'Vx' : jnp.mean(Vx), 'Target' : jnp.mean(target_value), 'valueLoss': ErrVx, 'policyLoss': ErrPix, 
-            'policyReg': w_loss_policy, 'valueReg': w_loss_value, 'w_opt_val' : w_opt_val, 'w_opt_pol' : w_opt_pol, 'GradVx' : gradVx_norm}
+#     # Define the augmented cost with the penalization term
+#     def aug_cost_fn(_x, _u, _slack, _cost_fn, extra_args=None):
+#         # Compute the actual cost
+#         actual_cost = _cost_fn(_x, _u, extra_args)
+#         if constr_cost is None:
+#             return actual_cost
+#         # Compute the constraints cost
+#         pen_cost = constr_cost(_x, _slack)
+#         return actual_cost + pen_cost
 
-    return valpol_params, loss_fn, (pol_pure_fn, val_pure_fn)
+#     # Define the function to integrate the cost function and the dynamics
+#     def sample_sde(y, opt_params, rng, _cost_fn, _terminal_cost=None, extra_dyn_args=None, 
+#                    extra_cost_args=None, extra_cost_terminal_args=None):
+
+#         # Do some check
+#         assert opt_params.ndim == 2, 'The parameters must be a two dimension array'
+#         if has_slack:
+#             assert opt_params.shape[1] == opt_params_size, 'Shape of the opt params do not match'
+#         else:
+#             assert opt_params.shape[1] == n_u, 'Shape of the opt params do not match'
+
+#         # Build the SDE solver
+#         m_model = sde_constr(params_model, **extra_args_sde_constr)
+
+#         # Compute the evolution of the state
+#         _aug_cost_fn = lambda x, u, slack, _extra_args: aug_cost_fn(x, u, slack, _cost_fn, _extra_args)
+#         x_evol = m_model.sample_dynamics_with_cost(y, opt_params, rng, _aug_cost_fn, state_idx,
+#                             extra_dyn_args=extra_dyn_args, extra_cost_args=extra_cost_args)
+
+#         # Evaluate the cost_to_go function
+#         # [TODO Franck] probably a bug here when using ts.shape-1 optimization variable
+#         # When has_slack should have ts.shape opt variable so that the slack
+#         # matches the end state/final state
+#         end_cost = _terminal_cost(x_evol[-1,:-1], feat=extra_cost_terminal_args) if _terminal_cost is not None else jnp.array(0.)
+#         if constr_cost is not  None:
+#             pen_cost = constr_cost(x_evol[-1,:-1], opt_params[0, n_u:] if has_slack else None)
+#         else:
+#             pen_cost = jnp.array(0.)
+#         # Compute the total cost by adding the terminal cost
+#         total_cost = pen_cost*time_steps[-1] + params_mpc['discount']*end_cost + x_evol[-1,-1]
+
+#         # Modified the cost to add the penalty with respect to constraints of the first state
+#         # x0_constr = 0. if not has_xbound else constr_cost_noprox(x_evol[0,:-1]) * time_steps[0]
+#         if has_xbound:
+#             # Initial constraint cost -> This should be constant as the constr cost is only a function of the state
+#             x_evol = x_evol.at[1:,-1].add(constr_cost_noprox(x_evol[0,:-1]) * time_steps[0])
+
+#         return total_cost, x_evol
+
+#     # Initialize an optimization parameters given a sequence of STATE x and u
+#     # [TODO Fanck] Define it in terms of observation and use the state to observation transformation to match the output
+#     # However the call of this with an observation will only happen once...
+#     def _construct_opt_params(u=None, x=None):
+#         # This ensures that if there is a slack variable
+#         # the constraint are also enforced on the terminal state
+#         # num_var = params_model['horizon'] + (0 if has_slack else 1)
+#         # TODO: Make a more general initialization that avoid infeasible control values
+#         num_var = params_model['horizon']
+#         # Non-zero initialization for gradient descent to work properly for the control inputs
+#         zero_u = jnp.ones((num_var, n_u)) * 1e-4
+#         # Non-zero initialization for gradient descent to work properly for the slack variables
+#         zero_x = jnp.ones((num_var, len(state_idx))) * 1e-4 if has_slack else None
+#         slack_scaling_vect = jnp.ones((num_var, len(state_idx))) * (slack_scaling if slack_scaling.ndim < 1 else slack_scaling[None] ) if has_slack else None
+
+#         if u is not None and u.ndim == 1:
+#             u = jnp.array([ u for _ in range(num_var)]) + 1e-4 # THis is just so that the parameters are not zero
+#         if x is not None and x.ndim == 1:
+#             x = jnp.array([ x for _ in range(num_var+1)])
+#         if x is not None: # We replace the first component of the state with the last component
+#             x = x.at[0,:].set(x[-1,:])
+
+#         if u is None and not has_slack:
+#             return zero_u # jnp.zeros((num_var, n_u))
+
+#         if u is None and x is None: # slack is true
+#             return jnp.concatenate((zero_u, zero_x), axis=1)# jnp.zeros((num_var, opt_params_size))
+
+#         if u is None and x is not None: # slack is true
+#             assert x.ndim == 2 and x.shape[0] == num_var+1
+#             return jnp.concatenate((zero_u, x[:-1,state_idx]/slack_scaling_vect), axis=1) + 1e-4
+
+#         if u is not None and not has_slack:
+#             assert u.ndim == 2 and u.shape[0] == num_var
+#             return u + 1e-4
+
+#         if u is not None and x is None: # has slack is true
+#             assert u.ndim == 2 and u.shape[0] == num_var
+#             return jnp.concatenate((u, zero_x), axis=1) + 1e-4
+
+#         if u is not None and x is not None: # has slack is true
+#             assert u.ndim == 2 and x.ndim == 2 and u.shape[0]+1 == x.shape[0]
+#             return jnp.concatenate((u, x[:-1,state_idx]/slack_scaling_vect), axis=1) + 1e-4
+
+#         assert False, 'This case is not handle...'
+
+#     # Transform the function into a pure one
+#     sampling_pure =  hk.without_apply_rng(hk.transform(sample_sde))
+#     nn_params = sampling_pure.init(rng_zero, yzero, _construct_opt_params(), rng_zero, _cost_fn_zero)
+
+#     # Now define the n_sampling method
+#     def multi_sampling(_nn_params, y, opt_params, rng, _cost_fn, _terminal_cost=None, extra_dyn_args=None, 
+#                        extra_cost_args=None, extra_cost_terminal_args=None):
+#         assert rng.ndim == 1, 'RNG must be a single key for vmapping'
+#         m_rng = jax.random.split(rng, num_sample)
+#         vmap_sampling = jax.vmap(sampling_pure.apply, in_axes=(None, None, None, 0, None, None, None, None, None))
+#         total_loss, xtraj = vmap_sampling(_nn_params, y, opt_params, m_rng, _cost_fn, _terminal_cost, 
+#                                           extra_dyn_args, extra_cost_args, extra_cost_terminal_args)
+#         return jnp.mean(total_loss), xtraj
+
+#     # Vmapped the function such that it works
+#     # Properly define the proximal_function
+#     vmapped_prox = None if proximal_fn is None else jax.vmap(proximal_fn)
+
+#     if vmapped_prox is not None:
+#         construct_opt_params = lambda u=None, x=None: vmapped_prox(_construct_opt_params(u,x))
+#     else:
+#         construct_opt_params = _construct_opt_params
+
+#     return nn_params, multi_sampling, vmapped_prox, constr_cost, construct_opt_params

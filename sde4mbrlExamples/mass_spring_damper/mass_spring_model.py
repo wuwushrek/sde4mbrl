@@ -1,8 +1,5 @@
 import jax
 
-# Set float 64 as default
-# jax.config.update("jax_enable_x64", True)
-
 import jax.numpy as jnp
 
 import numpy as np
@@ -20,27 +17,6 @@ from tqdm.auto import tqdm
 from functools import partial
 
 import yaml
-
-def get_monomial_basis(x, degree):
-    """Get the monomial basis of a given degree.
-    This function assumes a 2D input vector.
-    Currently only supports up to degree 3.
-
-    Args:
-        x (jax.numpy.ndarray): The input vector.
-        degree (int): The degree of the monomial basis.
-
-    Returns:
-        jax.numpy.ndarray: The monomial basis of the input vector.
-    """
-    if degree == 1:
-        return x
-    elif degree == 2:
-        return jnp.array([x[0], x[1], x[0]*x[1], x[0]**2, x[1]**2])
-    elif degree == 3:
-        return jnp.array([x[0], x[1], x[0]*x[1], x[0]**2, x[1]**2, x[0]**3, x[1]**3, x[0]**2*x[1], x[0]*x[1]**2])
-    else:
-        raise NotImplementedError
 
 class MassSpringDamper(ControlledSDE):
     """ An SDE and ODE model of the mass spring damper system.
@@ -87,11 +63,15 @@ class MassSpringDamper(ControlledSDE):
         return xdot
 
     def prior_diffusion(self, x, u, extra_args=None):
+        """ User-Specified Maximum diffusion outside of the training dataset
+        """
         # Set the prior to a constant noise as defined in the yaml file
         return jnp.array(self.params['noise_prior_params'])
 
 
     def compositional_drift(self, x, u, extra_args=None):
+        """ Compute the drift of the system. Check nsde.py for more details
+        """
         # In the ground truth case, we do not need to compute the residual
         if self.params.get('ground_truth',False):
             return self.vector_field(x, u)
@@ -107,6 +87,8 @@ class MassSpringDamper(ControlledSDE):
 
     
     def init_encoder(self):
+        """ Initialize the encoder -> For this example we essentially use the identity encoder
+        """
         _encoder_type = self.params.get('encoder_type', 'identity')
         if _encoder_type == 'ground_truth' or _encoder_type == 'identity':
             self.obs2state = self.identity_obs2state
@@ -115,9 +97,8 @@ class MassSpringDamper(ControlledSDE):
             raise ValueError('Unknown encoder type')
     
     def init_residual_networks(self):
-        """Initialize the residual networks.
+        """Initialize the residual neural networks
         """
-
         if 'residual_forces' not in self.params:
             return
 
@@ -125,33 +106,17 @@ class MassSpringDamper(ControlledSDE):
         residual_type = self.params['residual_forces']['type']
         init_value = self.params['residual_forces'].get('init_value', 0.001)
 
-        if residual_type in ['linear', 'quadratic', 'cubic']: # In case of polynomial residual forces
-            # Get the degree of the polynomial
-            num_deg = 1 if residual_type == 'linear' else 2 if residual_type == 'quadratic' else 3
-            # Define the residual function
-            def res_fn(x, _):
-                # Check if prior is asked
-                if self.params.get('prior', False):
-                    return 0.0
-                
-                _x_basis = get_monomial_basis(x, num_deg)
-                Fres_params = hk.get_parameter('Fres', shape=_x_basis.shape, 
-                                    init=hk.initializers.RandomUniform(-init_value, init_value))
-                
-                # Make sure if prior is asked, the residual is zero
-                return jnp.sum(Fres_params * _x_basis)
-            
-            # Store the residual function
-            self.residual = res_fn
+        if residual_type == 'dnn':
 
-        elif residual_type == 'dnn':
             # Get the residual network parameters
             _act_fn = self.params['residual_forces']['activation_fn']
             self.residual_forces = hk.nets.MLP([*self.params['residual_forces']['hidden_layers'], 1],
                                                 activation = getattr(jnp, _act_fn) if hasattr(jnp, _act_fn) else getattr(jax.nn, _act_fn),
                                                 w_init=hk.initializers.RandomUniform(-init_value, init_value),
                                                 name = 'Fres')
+            
             # Make sure if prior is asked, the residual is zero
+            # Here prior is used for ground truth model (no residual)
             self.residual = lambda x, _: self.residual_forces(x)[0] if not self.params.get('prior', False) else 0.0
         
         else:
@@ -163,7 +128,8 @@ def load_predictor_function(learned_params_dir, prior_dist=False, modified_param
         
         Args:
             learned_params_dir (str): The path to the learned parameters or to the nominal yaml model file
-            prior_dist (bool, optional): If True, the function will sample from the prior knowledge of the system + prior diffusion
+            prior_dist (bool, optional): If True, the function will return the prior knowledge 
+                                        of the system (residual is zero) + zero diffusion
             modified_params (dict, optional): A dictionary of parameters to modify the default parameters
         
         Returns:
@@ -186,8 +152,7 @@ def load_predictor_function(learned_params_dir, prior_dist=False, modified_param
         # vehicle parameters
         _model_params = learned_params['nominal']
         # SDE learned parameters -> All information are saved using numpy array to facilicate portability
-        # of jax accross different devices
-        # These parameters are the optimal learned parameters of the SDE
+        # of jax accross different devices. These parameters are the optimal learned parameters of the SDE after training
         _sde_learned = apply_fn_to_allleaf(jnp.array, np.ndarray, learned_params['sde'])
 
     # Update the parameters with a user-supplied dctionary of parameters
@@ -198,14 +163,12 @@ def load_predictor_function(learned_params_dir, prior_dist=False, modified_param
         # Remove the density NN parameters so that the noise is given by the prior diffusion only
         params_model.pop('diffusion_density_nn', None)
 
-
     # Create the model
     _prior_params, m_sampling = create_sampling_fn(params_model, sde_constr=MassSpringDamper)
 
     # Compute the timestep of the model the extract the time evolution starting t0 = 0
     time_steps = compute_timesteps(params_model)
     time_evol = np.array([0] + jnp.cumsum(time_steps).tolist())
-
 
     # Do not use the sde_learned params when sampling from the prior distribution
     _sde_learned = _prior_params if prior_dist else _sde_learned
@@ -258,12 +221,15 @@ def load_learned_diffusion(model_path, num_samples=1):
     # Load the pickle file
     with open(learned_params_dir, 'rb') as f:
         learned_params = pickle.load(f)
+
     # vehicle parameters
     _model_params = learned_params['nominal']
+
     # SDE learned parameters -> All information are saved using numpy array to facilicate portability
     # of jax accross different devices
     # These parameters are the optimal learned parameters of the SDE
     _sde_learned = apply_fn_to_allleaf(jnp.array, np.ndarray, learned_params['sde'])
+
     # Create the function to compute the diffusion
     _, m_diff_fn = create_diffusion_fn(_model_params, sde_constr=MassSpringDamper)
 
@@ -329,6 +295,7 @@ def load_data_generator(model_dir, noise_info={}, horizon=1, ufun=None):
         """
         # Set the seed
         np.random.seed(seed)
+
         # Buuild a PRNG key
         key = jax.random.PRNGKey(seed)
 
@@ -338,12 +305,15 @@ def load_data_generator(model_dir, noise_info={}, horizon=1, ufun=None):
         for i in tqdm(range(n_trans)):
             # Sample the initial state with numpy
             y0 = np.random.uniform(x_lb, x_ub)
+
             # Split the key for next iteration
             key, next_key = jax.random.split(key)
+
             # Compute next state
             y_evol, u_evol = sampling_fn_jit(y0, next_key)
             y_evol = np.array(y_evol) # Take only one particle
             u_evol = np.array(u_evol) # Take only one particle
+
             # Add noise to the measurement if enabled except for the first state
             if 'measurement_noise' in noise_info:
                 y_evol += np.random.normal(size=y_evol.shape) * noise_info['measurement_noise']
@@ -373,7 +343,7 @@ def train_sde(yaml_cfg_file, model_type, train_data, test_data, output_file=None
     cfg_train['model']['n_y']  = 2
     cfg_train['model']['n_u']  = 1
 
-    # Modify the model according to the type
+    # Modify the model according to the type [neural ODE, neural SDE, neural ODE with side info, neural SDE with side info]
     if 'node' in model_type:
         # We are dealing with training a neural ode model -> No noise and no learning of density
         cfg_train['model']['include_side_info'] = 'phys' in model_type
@@ -384,7 +354,7 @@ def train_sde(yaml_cfg_file, model_type, train_data, test_data, output_file=None
         cfg_train['sde_loss'].pop('density_loss', None) # Remove the density loss
         cfg_train['sde_loss'].pop('num_sample2consider', None)
     elif 'nesde' in model_type:
-        # We are dealing with training a neural sde model -> No noise and no learning of density
+        # We are dealing with training a neural sde model
         cfg_train['model']['include_side_info'] = 'phys' in model_type
     else:
         raise ValueError("Unknown model type: " + model_type)
@@ -481,6 +451,7 @@ def gen_traj_yaml(model_dir, data_gen_dir):
     domain_settings = cfg_data_gen['sampling_domain_settings']
     seed_trans  = cfg_data_gen['seed_trans']
     num_samples = cfg_data_gen['num_samples'] if isinstance(cfg_data_gen['num_samples'], list) else [cfg_data_gen['num_samples']]
+
     # Now create a list of all the possible configurations for the data generation
     data_gen_cfgs = []
     for num_sample in num_samples:
@@ -512,6 +483,7 @@ def gen_traj_yaml(model_dir, data_gen_dir):
     print("Generating test data")
     _cfg_t = cfg_data_gen['test_data']
     print(_cfg_t)
+
     gen_traj(model_dir, outfile='MSD_TestData', num_trans = _cfg_t['num_samples'], domain_lb = _cfg_t['domain_lb'], 
                 domain_ub = _cfg_t['domain_ub'], pnoise = _cfg_t['pnoise'], mnoise = _cfg_t['mnoise'], 
                 horizon = cfg_data_gen.get('horizon', 1), seed_trans= _cfg_t['test_seed'], regenerate=True
@@ -530,7 +502,7 @@ def train_models_on_dataset(model_dir, model_type, specific_data=None, modified_
             model_dir (str): The path for the groundtruth model definition
             model_type (str): The type of model to train
     """
-    current_dir = os.path.dirname(os.path.realpath(__file__)) + '/my_data'
+    current_dir = 'my_data/'
     # Extract all the files in the current directory that ends with .yaml
     files = [f for f in os.listdir(current_dir) if f.endswith('.yaml')]
 

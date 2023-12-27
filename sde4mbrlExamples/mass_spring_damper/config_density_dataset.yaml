@@ -1,17 +1,9 @@
-# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python density_script.py --fun gen_traj
-# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python density_script.py --fun train
-# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python density_script.py --fun plot
-
-# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python density_script.py --fun train
-# JAX_PLATFORM_NAME=cpu python density_script.py --fun plot --learned_dir my_models/ --data_dir my_data/
-
-
 ###################################################################################################################
 ######################### These are the configurations when generating the dataset  ###############################
 ###################################################################################################################
 seed_trans: 10
 
-# Horizon when generating the data
+# Horizon used when generating the data
 # Thus, the total number of data is num_sample * (horizon + 1)
 horizon: 50
 
@@ -19,7 +11,7 @@ horizon: 50
 noise_settings:
   LowNoise: 
     # pnoise: [0.001, 0.001] # Process noise
-    mnoise: [0.0005, 0.001] # Measurement noise
+    mnoise: [0.0005, 0.001] # Measurement noise added after integration of the groundtruth dynamics
 
 
 sampling_domain_settings:
@@ -45,6 +37,7 @@ test_data:
   domain_lb: [0, 0]
   domain_ub: [0.1, 0.1]
   test_seed: 20
+###################################################################################################################
 
 ###################################################################################################################
 ####################### Modified parameters to use when training the density function #############################
@@ -55,8 +48,9 @@ test_data:
 grad_pen_range_values: [1,]
 ball_radius_range: [0.05,]
 mu_coeff_range: [11,]
-trajId: 'DensityExp_25'
-# trajId: 'DensityExp_3'
+# For what dataset do we want to learn the distance-aware term
+# trajId: 'DensityExp_25'
+trajId: 'DensityExp_6'
 # Learning rate going to 0.001 at 10000 iterations for learning-based mu
 
 density_trainer:
@@ -67,7 +61,7 @@ density_trainer:
       scaler_nn:
           type: none 
       density_nn:
-        init_value: 0.1
+        init_value: 1.0
         activation_fn: swish
         # hidden_layers: [16, 16]
         hidden_layers: [32, 32]
@@ -83,9 +77,9 @@ density_trainer:
     # These two quantities are useless as we are just trying to fit the density function
     # This is the horizon of integration when computing the loss
     # It might get clipped to the horizon of each trajectory in the dataset if it's greater than trajectory length
-    horizon: 20
+    horizon: 10
     # Randomly subsample the horizon to fit only num_sample2consider if given
-    num_sample2consider: 5
+    # num_sample2consider: 5
 
     # Density loss parameters
     density_loss:
@@ -96,8 +90,8 @@ density_trainer:
         activation_fn: tanh
         # hidden_layers: [16, 16]
         hidden_layers: [8, 8]
-      mu_coeff: 10.0 # STrong convexity parameter
-      ball_radius: 0.05 # THe radius of the ball to sample for enforcing local strong convexity
+      mu_coeff: 10.0 # STrong convexity parameter -> This is erased by mu_coeff_range
+      ball_radius: 0.05 # THe radius of the ball to sample for enforcing local strong convexity -> This is erased by ball_radius_range
       ball_nsamples: 30 # Number of points to sample in the ball
       # grad_scaler: 1.0
 
@@ -105,7 +99,7 @@ density_trainer:
     pen_data: 0 # We remove it for density estimation
 
     # Penalty on the gradient of the density loss
-    pen_grad_density: 1.0 # 0.01
+    pen_grad_density: 1.0 # -> This is erased by grad_pen_range_values
 
     # Penalty on the local strong convexity constraints
     pen_density_scvex: 1.0
@@ -115,16 +109,14 @@ density_trainer:
 
     # Penalty on mu learnt
     pen_mu_coeff: 1.0
-    # Penalty on mu learnt
+    # Penalty on mu learnt and penalization function type
     pen_mu_type: lin_inv
-    pen_mu_coeff: 1.0
-    # Scaling down the dad term importance relative to data
-    # pen_scvex_mult: 0.01
+    pen_mu_coeff: 100.0
 
     #########################################################################
     # Extra constraints parameterization
     #########################################################################
-    default_weights: 1.0
+    default_weights: 0.0
 
 
   # Training configuration
@@ -133,19 +125,19 @@ density_trainer:
     - name: linear_schedule
       scheduler: True
       params:
-        init_value: -0.005 # Initial learning rate (Negative value for minimization)
+        init_value: -0.01 # Initial learning rate (Negative value for minimization)
         end_value: -0.001
         #transition_steps: 30000 # Basically the maximum number of gradient steps 
-        transition_steps: 5000
+        transition_steps: 30000
     
 
   # Training parameters
   sde_training:
-    train_batch: 512 # The mini batch size for the training dataset
+    train_batch: 1024 # The mini batch size for the training dataset
     test_batch: 512 # The mini batch size for the training dataset
     # nepochs: 50000 # The number of epochs (full pass over the training dataset)
-    nepochs: 200000
-    patience: 60000 # The number of epochs after which to stop the learningif no improvement in solution
+    nepochs: 45000
+    patience: 4000 # The number of epochs after which to stop the learning if no improvement in solution
     test_freq: 50 # Number of gradient steps after which to evaluate and display losses
     save_freq: 500 # Number of gradient steps after which to save the current losses+nn
     # epochs_before_checking_improv: 10
@@ -244,8 +236,57 @@ texConfig:
     
 paper_width_pt: 433.62
 use_pgf: False
-use_pdf: True
+use_pdf: False
 ##################################################################################################
+
+
+##################################################################################################
+#################### COnfiguration for plotting of Figure 3 in the Paper #########################
+fraction: 1.0
+use_pdf: False
+
+qrange: [-0.2, 0.2]
+qdotrange: [-0.2, 0.2]
+# Number of grids on the axes
+num_grid_q: 100
+num_grid_qdot: 100
+
+extra_args:
+  title_right_args:
+    rotation: -90
+    size: large
+    labelpad: 15
+  legend_args:
+    markerscale: 3
+    fancybox: False
+    frameon: False
+    handletextpad: -0.5
+    loc: upper center
+    bbox_to_anchor: [0.2, 1.0]
+
+fig_args:
+  figsize: [16, 4]
+  nrows: 1
+  ncols: 2
+  sharex: True
+  sharey: True
+
+files2plot: 'Grad1_Rad0.05_MuXX__DensityExp_XX'
+
+plot_configs:
+  # - value: ['11', '3']
+  - value: ['11', '25']
+  - value: ['11', '6']
+  # - value: ['9', '25']
+
+save_config:
+  fname: 'DadTermOnFewDataSet_v2.png'
+  dpi: 500
+
+# save_config_tex:
+#   fname: 'DadTermOnFewDataSet_v2.tex'
+
+#################################################################################################
 
 
 # #################################################################################
@@ -290,53 +331,6 @@ use_pdf: True
 #   dpi: 500
 
 
-#################################################################################
-###### First plot is the dad term with learning mu on the different dataset #####
-
-# JAX_PLATFORM_NAME=cpu python density_script.py --fun plot --learned_dir my_models/ --data_dir my_data/density_dataset/
-
-fraction: 1.0
-use_pdf: True
-
-qrange: [-0.2, 0.2]
-qdotrange: [-0.2, 0.2]
-# Number of grids on the axes
-num_grid_q: 100
-num_grid_qdot: 100
-
-extra_args:
-  title_right_args:
-    rotation: -90
-    size: large
-    labelpad: 15
-  legend_args:
-    markerscale: 3
-    fancybox: False
-    frameon: False
-    handletextpad: -0.5
-    loc: upper center
-    bbox_to_anchor: [0.2, 1.0]
-
-fig_args:
-  figsize: [16, 4]
-  nrows: 1
-  ncols: 2
-  sharex: True
-  sharey: True
-
-files2plot: 'Grad1_Rad0.05_MuXX__DensityExp_XX'
-
-plot_configs:
-  # - value: ['11', '3']
-  - value: ['11', '6']
-  - value: ['9', '25']
-
-save_config:
-  fname: 'DadTermOnFewDataSet_v2.png'
-  dpi: 500
-
-# save_config_tex:
-#   fname: 'DadTermOnFewDataSet_v2.tex'
 
 # #################################################################################
 # ###### We evaluate the effect of having the gradient constraint for fixed mu foxed 0.05 rad #####

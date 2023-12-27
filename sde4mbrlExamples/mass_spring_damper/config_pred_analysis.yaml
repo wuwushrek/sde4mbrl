@@ -1,7 +1,6 @@
 ###################################################################################################################
 ####################################### Plotting and other configuration  #########################################
 ###################################################################################################################
-# JAX_PLATFORM_NAME=cpu python pred_analysis_script.py --fun unc
 
 #######################################################################
 ################ General configuration file ###########################
@@ -117,77 +116,6 @@ paper_width_pt: 433.62
 use_pgf: False
 use_pdf: True
 
-# ############################# DaD dataset mesh plots #########################################
-# ##########################################################################################
-
-# JAX_PLATFORM_NAME=cpu python pred_analysis_script.py --fun density
-
-# fraction: 1.2
-
-# qrange: [-0.25, 0.25]
-# qdotrange: [-0.25, 0.25]
-# # Number of grids on the axes
-# num_grid_q: 100
-# num_grid_qdot: 100
-
-# # Enable uncertainty computation instead of density
-# compute_density: True
-# num_particles_std: 100
-# horizon_uncertainty: 5
-# # vmin: 0
-# # vmax: 0.03
-
-# colorbar_args:
-#   shrink: 0.98
-#   # extend: both
-#   pad: 0.03
-
-# extra_args:
-#   title_right_args:
-#     rotation: -90
-#     size: large
-#     labelpad: 12
-#   legend_args:
-#     markerscale: 3
-#     fancybox: False
-#     frameon: False
-#     handletextpad: -0.5
-#     loc: upper center
-#     bbox_to_anchor: [0.2, 1.0]
-
-# fig_args:
-#   figsize: [16, 8]
-#   nrows: 2
-#   ncols: 3
-#   sharex: True
-#   sharey: True
-
-# files2plot: 'nesde_bboxes__MSD_MeasXX_XX_XX'
-# plot_configs:
-#   - value: ['Low', 'TopRight', '5']
-#     title: 'Low noise'
-#     net: False
-#   - value: ['High', 'TopRight', '5']
-#     title: 'High noise'
-#     net: False
-#   - value: ['LowProcNoise', 'TopRight', '5']
-#     title: 'Process noise'
-#     title_right: '\small{$N_{traj} = 5$}'
-#     net: False
-  
-#   - value: ['Low', 'FullSpace', '10']
-#     net: False
-#   - value: ['High', 'FullSpace', '10']
-#     net: False
-#   - value: ['LowProcNoise', 'FullSpace', '10']
-#     title_right: '\small{$N_{traj} = 10$}'
-#     net: False
-
-# save_config:
-#   fname: 'MassSpring_SDE_density.png'
-#   # fname: 'MassSpring_SDE_Uncertainty.png'
-#   dpi: 500
-
 
 ###########################################################################
 ############### Plotting prediction error and uncertainty #################
@@ -244,7 +172,7 @@ plot_configs:
   #   title: 'Low Meas Noise'
   - value: ['node_bboxes',]
     title: 'Neural ODE'
-  - value: ['gaussian_mlp_ensemble_hid_32_ens_5',]
+  - value: ['gaussian_mlp_ensemble_hid_64_ens_5',]
     title: 'Prob. Ensemble'
     mean_type: median
   - value: ['nesde_bboxes',]
@@ -258,8 +186,8 @@ save_config:
 
 
 
-# ###########################################################################
-# ####### Plotting state evolution wrt neural ode and groundtruth ###########
+# #############################################################################################
+# ################# Plotting state evolution wrt neural ode and groundtruth ###################
 
 # # JAX_PLATFORM_NAME=cpu python pred_analysis_script.py --fun pred
 # use_pgf: False
@@ -268,7 +196,7 @@ save_config:
 # fraction: 1.2
 
 # # Evaluation dataset
-# train_data_name: MSD_MeasHigh_FullSpace_10
+# train_data_name: MSD_MeasHigh_TopRight_5 # 10
 # horizon_eval: 800 # Horizon of integration for prediction comparison
 # num_particles_eval: 50 # Number of particles for uncertainty
 # init_config: [0.15, -0.15]
@@ -352,9 +280,10 @@ save_config:
 #   fname: 'Prediction_NODEvsNSDE.png'
 #   dpi: 500
 
-# global_legend: False
-# save_config_tex:
-#   fname: 'Prediction_NODEvsNSDE.tex'
+# # global_legend: False
+# # save_config_tex:
+# #   fname: 'Prediction_NODEvsNSDE.tex'
+# ###################################################################################################
 
 
 
@@ -998,4 +927,75 @@ save_config:
 
 # save_config:
 #   fname: 'state_nesdeVsnode_MeasHigh_FullSpace_10_iid.png'
+#   dpi: 500
+
+# ############################# DaD dataset mesh plots #########################################
+# ##########################################################################################
+
+# JAX_PLATFORM_NAME=cpu python pred_analysis_script.py --fun density
+
+# fraction: 1.2
+
+# qrange: [-0.25, 0.25]
+# qdotrange: [-0.25, 0.25]
+# # Number of grids on the axes
+# num_grid_q: 100
+# num_grid_qdot: 100
+
+# # Enable uncertainty computation instead of density
+# compute_density: True
+# num_particles_std: 100
+# horizon_uncertainty: 5
+# # vmin: 0
+# # vmax: 0.03
+
+# colorbar_args:
+#   shrink: 0.98
+#   # extend: both
+#   pad: 0.03
+
+# extra_args:
+#   title_right_args:
+#     rotation: -90
+#     size: large
+#     labelpad: 12
+#   legend_args:
+#     markerscale: 3
+#     fancybox: False
+#     frameon: False
+#     handletextpad: -0.5
+#     loc: upper center
+#     bbox_to_anchor: [0.2, 1.0]
+
+# fig_args:
+#   figsize: [16, 8]
+#   nrows: 2
+#   ncols: 3
+#   sharex: True
+#   sharey: True
+
+# files2plot: 'nesde_bboxes__MSD_MeasXX_XX_XX'
+# plot_configs:
+#   - value: ['Low', 'TopRight', '5']
+#     title: 'Low noise'
+#     net: False
+#   - value: ['High', 'TopRight', '5']
+#     title: 'High noise'
+#     net: False
+#   - value: ['LowProcNoise', 'TopRight', '5']
+#     title: 'Process noise'
+#     title_right: '\small{$N_{traj} = 5$}'
+#     net: False
+  
+#   - value: ['Low', 'FullSpace', '10']
+#     net: False
+#   - value: ['High', 'FullSpace', '10']
+#     net: False
+#   - value: ['LowProcNoise', 'FullSpace', '10']
+#     title_right: '\small{$N_{traj} = 10$}'
+#     net: False
+
+# save_config:
+#   fname: 'MassSpring_SDE_density.png'
+#   # fname: 'MassSpring_SDE_Uncertainty.png'
 #   dpi: 500
