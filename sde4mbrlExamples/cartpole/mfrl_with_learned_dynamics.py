@@ -1,3 +1,6 @@
+""" Main file to train and evaluate the different RL agents on the cartpole environment
+"""
+
 import os
 
 import torch
@@ -310,7 +313,7 @@ def _load_pkl(filename):
     
 def generate_plotData_from_cfg(cfg_dict):
     """
-    Generate the data to plot from the configuration file
+    Generate the (performance) data to plot from the configuration file
     """
     data_dir = os.path.dirname(os.path.realpath(__file__)) + '/my_data/'
     # Get the list of models to evaluate
@@ -356,7 +359,7 @@ def get_best_agent(model_name, mydata, min_num_interaction=20000):
     best_mean_reward_max = np.max(rewValues_mean)
     return best_mean_reward_min, best_mean_reward_max
 
-def generate_barplot_data(cfg_dict):
+def generate_barplot_data(cfg_dict, outbar='barplot_data.yaml'):
     """ Generate the data for the barplot in the paper and save it as a yaml file in my_data
     """
     # Load the data
@@ -423,7 +426,7 @@ def generate_barplot_data(cfg_dict):
         dict_results[model_name]['_std_max_rew_per_seed_gt_scaled'] = dict_results[model_name]['_std_max_rew_per_seed_gt'] / scaling_factor_max
 
     # Save the results as a yaml file
-    with open(data_dir + 'barplot_data.yaml', 'w') as f:
+    with open(data_dir + outbar, 'w') as f:
         yaml.dump(dict_results, f)
 
 
@@ -555,15 +558,27 @@ def plot_data(cfg_dict):
                 ax.set_ylabel(r'Cartpole total reward ($\times 10^2$)')
                 ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:.0f}".format(x/100)))
 
-        if cfg_dict.get('global_legend', None) == False:
-            ax.legend()
-
+        # if cfg_dict.get('global_legend', None) == False:
+        #     ax.legend()
         ax.grid(True)
     
-
     # Collect all the labels and show them in the legend
-    if  cfg_dict.get('global_legend', None) == True:
-        fig.legend(**cfg_dict.get('extra_args',{}).get('legend_args', {}))
+    lines = []
+    labels = []
+    for ax in axs:
+        l, l_ = ax.get_legend_handles_labels()
+        # Add only non-duplicate labels
+        for _l, _l_ in zip(l, l_):
+            if _l_ not in labels:
+                lines.append(_l)
+                labels.append(_l_)
+    # fig.legend(lines, labels, loc='upper center', ncol=4, bbox_to_anchor=(0.5, 1.05))
+    fig.legend(lines, labels, **cfg_dict.get('extra_args',{}).get('legend_args', {}))
+        
+
+    # # Collect all the labels and show them in the legend
+    # if  cfg_dict.get('global_legend', None) == True:
+    #     fig.legend(**cfg_dict.get('extra_args',{}).get('legend_args', {}))
 
     # Save the figure
     if 'save_config' in cfg_dict.keys():
@@ -583,12 +598,24 @@ def plot_data(cfg_dict):
     # Show the figure
     plt.show()
 
+# def tikzplotlib_fix_ncols(obj):
+#     """
+#     workaround for matplotlib 3.6 renamed legend's _ncol to _ncols, which breaks tikzplotlib
+#     """
+#     if hasattr(obj, "_ncols"):
+#         obj._ncol = obj._ncols
+#     for child in obj.get_children():
+#         tikzplotlib_fix_ncols(child)
+
 def tikzplotlib_fix_ncols(obj):
     """
     workaround for matplotlib 3.6 renamed legend's _ncol to _ncols, which breaks tikzplotlib
     """
     if hasattr(obj, "_ncols"):
         obj._ncol = obj._ncols
+    if hasattr(obj, "_dash_pattern"):
+        obj._us_dashOffset = obj._dash_pattern[0]
+        obj._us_dashSeq = obj._dash_pattern[1]
     for child in obj.get_children():
         tikzplotlib_fix_ncols(child)
 
@@ -602,6 +629,7 @@ if __name__ == '__main__':
     # Create model_file argument which can be a string or a list of strings
     parser.add_argument('--model_files', type=str,  nargs='+', default=['groundtruth',], help='The name of the models or model files')
     parser.add_argument('--method', type=str, default='ppo', help='The RL method to use')
+    parser.add_argument('--outbar', type=str, default='barplot_data.yaml', help='The name of the output file for the barplot')
 
     # Parse the arguments
     args = parser.parse_args()
@@ -616,4 +644,4 @@ if __name__ == '__main__':
     elif args.fun == 'plot':
         plot_data(cfg_dict)
     elif args.fun == 'barplot':
-        generate_barplot_data(cfg_dict)
+        generate_barplot_data(cfg_dict, args.outbar)

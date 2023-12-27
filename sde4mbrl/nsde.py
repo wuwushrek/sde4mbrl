@@ -71,6 +71,7 @@ def sampling_strat_under_dataset_with_finer_steps(arr, strategy, rng_den):
 
 
 # [TODO Franck]: Document this function after checking the sde modeling and its docs 
+# For more modularity, this should be separated from the class
 def initialize_problem_constraints(n_x, n_u, params_model):
     """Check if there are any constraints involved on the hidden states or the inputs
        of the sde model. The constraints are going to be enforced via nonsmooth optimization
@@ -129,6 +130,7 @@ def initialize_problem_constraints(n_x, n_u, params_model):
             (has_xbound, slack_proximal, state_idx, penalty_coeff, state_lb, state_ub, weight_constr, slack_scaling)
 
 
+# TODO: Many duplication here. More modularity but this is enough for the paper
 class ControlledSDE(hk.Module):
     """Define an SDE (stochastic differential equation) with observation and state (latent) variables
     and which is controlled via a control input. 
@@ -338,6 +340,7 @@ class ControlledSDE(hk.Module):
                 - diffusion_density_nn -> density_nn -> activation_fn, hidden_layers -> The parameters of the NN
 
         """
+        # TODO: Cleaner code is needed here. A lot of heuristic to facilitate regularization and initial value of the density terms.
 
         # Define the default eta and scaler functions if they are not gievn in the params
         self.scaler_fn = None
@@ -418,7 +421,8 @@ class ControlledSDE(hk.Module):
                 # We can clearly see how the scaler_coeff and scaler_offset are learned and used to redistribute the noise
                 
                 # [TODO, Franck] Include other sort of noise here based on the paper description. 
-                # Our experiments work well with this noise
+                # This is extremely simple and might be generating mostly homogeneous noise since sde kernel is not well estimated.
+                # Our experiments work well with this sort of noise and characterizes epsisteic uncertainty.
                 return jax.nn.sigmoid((aggr + scaler_coeff) * _density - 7.0 + scaler_offset)
             
             # Utilities function to access 
@@ -1333,6 +1337,7 @@ def create_model_loss_fn(model_params, loss_params, sde_constr=ControlledSDE, ve
     
     return nn_params, loss_fn, nonneg_projection, test_fn
 
+# TODO: Definiely not at the right placed. More modularization needed
 def create_online_cost_sampling_fn(params_model,
                             params_mpc,
                             sde_constr= ControlledSDE,

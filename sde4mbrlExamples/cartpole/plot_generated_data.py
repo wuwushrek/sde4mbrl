@@ -1,3 +1,5 @@
+""" Script to plot a few trajectories from the generated dataset
+"""
 import pickle
 
 import numpy as np

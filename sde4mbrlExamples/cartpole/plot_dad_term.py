@@ -309,12 +309,15 @@ def plot_prediction_accuracy(cfg_path):
 
         # convert the xevol to cartpole state
         xevol_converted = np.array([ [ _convert_to_cartpole_state(_x) for _x in _xevol] for _xevol in xevol])
-        
-        # Compute the prediction error
-        xevol_con_reshaped = xevol_converted[None].transpose(1,0,2,3)
-        # pred_error = np.linalg.norm(x_pred_mean - xevol_converted, axis=-1)
-        pred_error = np.linalg.norm(x_pred - xevol_con_reshaped, axis=-1)
-        pred_error = np.mean(pred_error, axis=0)
+        print(x_pred.shape, xevol_converted.shape)
+        # Compute the prediction error wrt mean trajectory
+        pred_error = np.linalg.norm(x_pred_mean - xevol_converted, axis=-1)
+
+        # # Compute the prediction error
+        # xevol_con_reshaped = xevol_converted[None].transpose(1,0,2,3)
+        # # pred_error = np.linalg.norm(x_pred_mean - xevol_converted, axis=-1)
+        # pred_error = np.linalg.norm(x_pred - xevol_con_reshaped, axis=-1)
+        # pred_error = np.mean(pred_error, axis=0)
 
         # First let's plot the groundtruth and predicted quantities
         indx2plot = density_cfg.get('indx2plot', 0)
@@ -399,6 +402,19 @@ def plot_prediction_accuracy(cfg_path):
                 max_state = np.max(x_pred[indx2plot, :, :, _i], axis=0)
                 ax.fill_between(time_steps, min_state, max_state, alpha=alpha_std, linewidth=0.0, color=curve_plot_style[model_name]['color_std'])
         first_model = False
+    
+    # Collect all the labels and show them in the legend
+    lines = []
+    labels = []
+    for ax in axs:
+        l, l_ = ax.get_legend_handles_labels()
+        # Add only non-duplicate labels
+        for _l, _l_ in zip(l, l_):
+            if _l_ not in labels:
+                lines.append(_l)
+                labels.append(_l_)
+    # fig.legend(lines, labels, loc='upper center', ncol=4, bbox_to_anchor=(0.5, 1.05))
+    fig.legend(lines, labels, **density_cfg.get('extra_args',{}).get('legend_args', {}))
 
     # Save the figure
     if 'save_config' in density_cfg:
@@ -418,7 +434,7 @@ def plot_prediction_accuracy(cfg_path):
         fig.savefig(**density_cfg['save_config'], bbox_inches='tight')
     
     if 'save_config_tex' in density_cfg.keys():
-        axs[0].legend(**density_cfg.get('extra_args',{}).get('legend_args', {}))
+        # axs[0].legend(**density_cfg.get('extra_args',{}).get('legend_args', {}))
         tikzplotlib_fix_ncols(fig)
         import tikzplotlib
         density_cfg['save_config_tex']['fname'] = figure_out + density_cfg['save_config_tex']['fname']
@@ -427,12 +443,24 @@ def plot_prediction_accuracy(cfg_path):
 
     plt.show()
 
+# def tikzplotlib_fix_ncols(obj):
+#     """
+#     workaround for matplotlib 3.6 renamed legend's _ncol to _ncols, which breaks tikzplotlib
+#     """
+#     if hasattr(obj, "_ncols"):
+#         obj._ncol = obj._ncols
+#     for child in obj.get_children():
+#         tikzplotlib_fix_ncols(child)
+
 def tikzplotlib_fix_ncols(obj):
     """
     workaround for matplotlib 3.6 renamed legend's _ncol to _ncols, which breaks tikzplotlib
     """
     if hasattr(obj, "_ncols"):
         obj._ncol = obj._ncols
+    if hasattr(obj, "_dash_pattern"):
+        obj._us_dashOffset = obj._dash_pattern[0]
+        obj._us_dashSeq = obj._dash_pattern[1]
     for child in obj.get_children():
         tikzplotlib_fix_ncols(child)
     
@@ -444,6 +472,8 @@ def create_uncertainty_plot(cfg_path):
     learned_dir = 'my_models/'
     # The directory where the plots will be stored
     figure_out = 'my_data/figures/'
+    if not os.path.exists(figure_out):
+        os.makedirs(figure_out)
 
     # Extract the plot configs. This is a list of dictionaries, where the number of elements is the number of subplots
     model2plot = density_cfg['model2plot']
@@ -625,7 +655,7 @@ if __name__ == '__main__':
     import argparse
     
     # Create the parser
-    parser = argparse.ArgumentParser(description='Mass Spring Damper Model, Data Generator, and Trainer')
+    parser = argparse.ArgumentParser(description='Plot utils for cartpole')
 
     # Add the arguments
     parser.add_argument('--fun', type=str, default='dad', help='The function to run')

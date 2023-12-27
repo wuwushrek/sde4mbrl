@@ -58,75 +58,12 @@ paper_width_pt: 433.62
 use_pgf: False
 use_pdf: False
 
-# ########################################################################
-# ######################### Uncertainty plots ############################
+########################################################################
+######################### Uncertainty plots ############################
 
-# # JAX_PLATFORM_NAME=cpu python plot_dad_term.py --fun unc
-# use_pdf: True
-# fraction: 1.2
+# # -----> To uncomment for Figure 10 experiments
 
-# #################
-# model2plot: [cartpole_bb_random_sde, gaussian_mlp_ensemble_cartpole_random]
-
-# # curve_plot_style:
-# #   cartpole_bb_learned_sde:
-# #     title: Our model
-# #   gaussian_mlp_ensemble_cartpole_learned:
-# #     title: Gaussian ensemble
-
-# curve_plot_style:
-#   cartpole_bb_random_sde:
-#     title: Our model
-#   gaussian_mlp_ensemble_cartpole_random:
-#     title: Gaussian ensemble
-
-# # Range used for the mesh plot
-# thetarange: [-3.9, 3.9]
-# thetadotrange: [-15, 15]
-# # Number of grids on the axes
-# num_grid_theta: 100
-# num_grid_thetadot: 100
-
-# horizon_eval: 10
-# num_particles_eval: 50
-
-# # Seed for operations related to the density estimation
-# seed_mesh: 10
-
-# extra_args:
-#   title_right_args:
-#     rotation: -90
-#     size: large
-#     labelpad: 12
-#   legend_args:
-#     markerscale: 3
-#     fancybox: False
-#     frameon: False
-#     handletextpad: -0.5
-#     loc: upper center
-#     bbox_to_anchor: [0.2, 1.0]
-
-# # The list of models to plot in the configuration (usually a grid) they need to be plotted
-# fig_args:
-#   figsize: [14, 6]
-#   nrows: 1
-#   ncols: 2
-#   sharex: True
-#   sharey: True
-
-# # # Normalize mesh
-# normalize_mesh: True
-# # vmin: 0
-# # vmax: 0.2
-
-# # Filename of the training dataset used for each model to plo
-# train_data: 'random.pkl'
-
-# save_config:
-#   fname: 'Unc_random_GEvsSDE.png'
-#   dpi: 500
-
-# #####################
+# # These models need to be present in my_models
 # model2plot: [cartpole_bb_random_sde, gaussian_mlp_ensemble_cartpole_random, cartpole_bb_learned_sde, gaussian_mlp_ensemble_cartpole_learned]
 # fraction: 1.2
 
@@ -191,112 +128,376 @@ use_pdf: False
 #   fname: 'Unc_all_GEvsSDE.png'
 #   dpi: 500
 
+# # ----> END Figure 10 in the paper
+#########################################################################################################
 
-########################################################################
-############### Prediction accuracy comparison plots ###################
-# JAX_PLATFORM_NAME=cpu python plot_dad_term.py --fun pred
+###############################################################################################
+############### Prediction accuracy comparison plots with Gaussian Ensemble ###################
 
-use_pgf: False
-use_pdf: False
+# # -----> To uncomment for Figure 11 experiments
 
-fraction: 1.2
+# use_pgf: False
+# use_pdf: False
 
-# Evaluation dataset
-eval_data: learned.pkl
-num_traj_eval: 10 # NUmber of trajectory over which to estimate the prediction accuracy
-# seed_traj_eval: 10 # Random seed for randomly pick the trajectory to evaluate
-horizon_eval: 45 # Horizon of integration for prediction comparison
-num_particles_eval: 50 # Number of particles for uncertainty
-start_eval_strategy: first # first or random -> Strategy to pick the initial point in each trajectory selected
+# fraction: 1.2
 
-# The models to show on the plot
-model2plot: [cartpole_bb_learned_sde, gaussian_mlp_ensemble_cartpole_random]
-seed_eval: 15 # The seed for the probabilistic models: sde or jax
-indx2plot: 6 # The trajectory in the list of picked trajectories to plot for displaying state evolution
+# # Evaluation dataset
+# eval_data: learned.pkl
+# num_traj_eval: 10 # NUmber of trajectory over which to estimate the prediction accuracy
+# # seed_traj_eval: 10 # Random seed for randomly pick the trajectory to evaluate
+# horizon_eval: 45 # Horizon of integration for prediction comparison
+# num_particles_eval: 50 # Number of particles for uncertainty
+# start_eval_strategy: first # first or random -> Strategy to pick the initial point in each trajectory selected
 
-# data_spacing: 15
+# # The models to show on the plot
+# model2plot: [cartpole_bb_rand_sde, gaussian_mlp_ensemble_cartpole_random]
+# # model2plot: [cartpole_bb_learned_si_sde, cartpole_bb_learned_ode_si_sde] #, gaussian_mlp_ensemble_cartpole_random]
+# seed_eval: 15 # The seed for the probabilistic models: sde or jax
+# indx2plot: 6 # The trajectory in the list of picked trajectories to plot for displaying state evolution
+# # indx2plot: 22 # The trajectory in the list of picked trajectories to plot for displaying state evolution
 
-# The percentiles used when plotting the sde distribution
+# # data_spacing: 15
+
+# # The percentiles used when plotting the sde distribution
+# # alpha_percentiles: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]
+# # percentiles_array: [0.999, 0.99, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.25]
+
 # alpha_percentiles: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]
-# percentiles_array: [0.999, 0.99, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.25]
+# percentiles_array: [0.75, 0.70, 0.65, 0.6, 0.55, 0.53, 0.5, 0.4, 0.3, 0.25]
 
-alpha_percentiles: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]
-percentiles_array: [0.75, 0.70, 0.65, 0.6, 0.55, 0.53, 0.5, 0.4, 0.3, 0.25]
+# # Which style to use for standardt deviation
+# # std_style: perc75 # std or minmax or perc (for percentiles)
+# alpha_std: 0.3
 
-# Which style to use for standardt deviation
-# std_style: perc75 # std or minmax or perc (for percentiles)
-alpha_std: 0.3
+# # ylim: 
+# #   - null
+# #   - null
+# #   - [-1.1, 1.1]
+# #   - [-1.1, 1.1]
+# #   - null
 
-# ylim: 
-#   - null
-#   - null
-#   - [-1.1, 1.1]
-#   - [-1.1, 1.1]
-#   - null
+# # Default
+# # ylim: 
+# #   - null
+# #   - null
+# #   - [-0.8, 1.1]
+# #   - [-1.1, 0.3]
+# #   - null
 
-ylim: 
-  - null
-  - null
-  - [-0.8, 1.1]
-  - [-1.1, 0.3]
-  - null
+# # Plot general configurations
+# general_style:
+#   linewidth: 2.0
 
-# Plot general configurations
-general_style:
-  linewidth: 2.0
+# # # Plot specifc configuration dictionary
+# curve_plot_style:
+#   cartpole_bb_learned_si_sde:
+#     label: "Our model"
+#     # color: "#ff7f0e"
+#     color: "#d62728"
+#     color_std: "#d62728"
+#     # std_style: minmax
+#     zorder: 60
+#   cartpole_bb_learned_ode_si_sde:
+#     label: "NODE"
+#     # color: "#ff7f0e"
+#     color: "#ff7f0e"
+#     color_std: "#ff7f0e"
+#     # std_style: minmax
+#     zorder: 60
+#   cartpole_bb_learned_sde:
+#     label: "Our model"
+#     # color: "#ff7f0e"
+#     color: "#d62728"
+#     color_std: "#d62728"
+#     # std_style: minmax
+#     zorder: 60
+#   cartpole_bb_rand_sde:
+#     label: "Our model"
+#     # color: "#ff7f0e"
+#     color: "#d62728"
+#     color_std: "#d62728"
+#     # std_style: minmax
+#     zorder: 60
+#   cartpole_bb_learned_ode_sde:
+#     label: "NODE"
+#     # color: "#ff7f0e"
+#     color: "#ff7f0e"
+#     color_std: "#ff7f0e"
+#     # std_style: minmax
+#     zorder: 60
+#   gaussian_mlp_ensemble_cartpole_random:
+#     label: "Gaussian ensemble"
+#     color: "#2ca02c"
+#     color_std: "#2ca02c"
+#     std_style: perc
+#     # linestyle: '-'
+#     zorder: 10
+#   groundtruth:
+#     label: "Groundtruth"
+#     color: "#1f77b4"
+#     # linestyle: '-'
+#     zorder: 80
 
-# Plot specifc configuration dictionary
-curve_plot_style:
-  cartpole_bb_learned_sde:
-    label: "Our model"
-    # color: "#ff7f0e"
-    color: "#d62728"
-    color_std: "#d62728"
-    # std_style: minmax
-    zorder: 60
-  gaussian_mlp_ensemble_cartpole_random:
-    label: "Gaussian ensemble"
-    color: "#2ca02c"
-    color_std: "#2ca02c"
-    std_style: perc
-    # linestyle: '-'
-    zorder: 10
-  # gaussian_mlp_ensemble_cartpole_learned_PPO_gt:
-  #   label: "Policy tested in environment"
-  #   color: "#d62728"
-  #   color_std: "#d62728"
-  #   zorder: 20
-  # gaussian_mlp_ensemble_cartpole_learned_PPO:
-  #   label: "Policy trained with learned PE"
-  #   color: "#9467bd"
-  #   color_std: "#9467bd"
-  #   linestyle: '--'
-  #   zorder: 10
-  groundtruth:
-    label: "Groundtruth"
-    color: "#1f77b4"
-    # linestyle: '-'
-    zorder: 80
+# extra_args:
+#   legend_args:
+#     loc: 'upper center'
+#     bbox_to_anchor: [0.5, 1.0]
+#     ncol: 3
 
-extra_args:
-  legend_args:
-    loc: 'upper center'
-    bbox_to_anchor: [0.5, 1.0]
-    ncol: 3
+# # The grid configuration and extra figure parameters like spacing etc..
+# fig_args:
+#   figsize: [14, 8]
 
-# The grid configuration and extra figure parameters like spacing etc..
-fig_args:
-  figsize: [14, 8]
+# save_config:
+#   fname: 'Prediction_GEvsNSDE.png'
+#   dpi: 500
 
-save_config:
-  fname: 'Prediction_GEvsNSDE.png'
-  dpi: 500
+# # global_legend: False
+# # save_config_tex:
+# #   fname: 'Prediction_GEvsNSDE.tex'
 
-global_legend: False
-save_config_tex:
-  fname: 'Prediction_GEvsNSDE.tex'
+# ----> END Figure 10 in the paper
 
-############################# DAD term only #############################
+################################################################################################
+
+
+#################################################################################
+############### Prediction accuracy comparison plots with ODE ###################
+
+# # -----> To uncomment for Figures 12, 13, and 14 experiments
+
+# use_pgf: False
+# use_pdf: False
+
+# fraction: 1.2
+
+# # Evaluation dataset
+# eval_data: learned.pkl
+# num_traj_eval: 10 # NUmber of trajectory over which to estimate the prediction accuracy
+# # seed_traj_eval: 10 # Random seed for randomly pick the trajectory to evaluate
+# horizon_eval: 45 # Horizon of integration for prediction comparison
+# num_particles_eval: 50 # Number of particles for uncertainty
+# start_eval_strategy: first # first or random -> Strategy to pick the initial point in each trajectory selected
+
+# # The models to show on the plot
+# model2plot: [cartpole_bb_learned_sde, gaussian_mlp_ensemble_cartpole_random]
+# # model2plot: [cartpole_bb_learned_si_sde, cartpole_bb_learned_ode_si_sde] #, gaussian_mlp_ensemble_cartpole_random]
+# seed_eval: 15 # The seed for the probabilistic models: sde or jax
+# indx2plot: 6 # The trajectory in the list of picked trajectories to plot for displaying state evolution
+# # indx2plot: 22 # The trajectory in the list of picked trajectories to plot for displaying state evolution
+
+# # data_spacing: 15
+
+# alpha_percentiles: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]
+# percentiles_array: [0.75, 0.70, 0.65, 0.6, 0.55, 0.53, 0.5, 0.4, 0.3, 0.25]
+
+# # Which style to use for standardt deviation
+# # std_style: perc75 # std or minmax or perc (for percentiles)
+# alpha_std: 0.3
+
+# # ylim: 
+# #   - null
+# #   - null
+# #   - [-1.1, 1.1]
+# #   - [-1.1, 1.1]
+# #   - null
+
+# # Default
+# # ylim: 
+# #   - null
+# #   - null
+# #   - [-0.8, 1.1]
+# #   - [-1.1, 0.3]
+# #   - null
+
+# # Plot general configurations
+# general_style:
+#   linewidth: 2.0
+
+# # # Plot specifc configuration dictionary
+# curve_plot_style:
+#   cartpole_bb_random_sde:
+#     label: "Neural SDE (Ours)"
+#     color: "#157F1F"
+#     color_std: "#157F1F"
+#     zorder: 20
+
+#   cartpole_bb_rand_ode_sde:
+#     label: "Neural ODE"
+#     color: "#00A7E1"
+#     color_std: "#00A7E1"
+#     zorder: 22
+
+#   cartpole_bb_learned_sde:
+#     label: "Neural SDE (Ours)"
+#     color: "#157F1F"
+#     color_std: "#157F1F"
+#     zorder: 20
+
+#   cartpole_bb_learned_si_sde:
+#     label: "Neural SDE (Ours) w/ Side Info."
+#     color: "#7FB800"
+#     color_std: "#7FB800"
+#     zorder: 20
+
+#   cartpole_bb_learned_ode_sde:
+#     label: "Neural ODE"
+#     color: "#00A7E1"
+#     color_std: "#00A7E1"
+#     zorder: 22
+
+#   cartpole_bb_learned_ode_si_sde:
+#     label: "Neural ODE w/ Side Info."
+#     color: "#b2b2f9"
+#     color_std: "#b2b2f9"
+#     zorder: 22
+
+#   gaussian_mlp_ensemble_cartpole_learned:
+#     label: "Prob. Ensemble"
+#     color: "#FF6D00"
+#     color_std: "#FF6D00"
+#     zorder: 10
+
+#   gaussian_mlp_ensemble_cartpole_random:
+#     label: "Prob. Ensemble"
+#     color: "#FF6D00"
+#     color_std: "#FF6D00"
+#     zorder: 10
+#     std_style: perc
+
+#   groundtruth:
+#     label: "Ground Truth"
+#     color: "#000000"
+#     # color_std: "#000000"
+#     # linestyle: 'dotted'
+#     zorder: 25
+
+# extra_args:
+#   legend_args:
+#     loc: 'upper center'
+#     bbox_to_anchor: [0.5, 1.05]
+#     ncol: 4
+# # The grid configuration and extra figure parameters like spacing etc..
+# fig_args:
+#   figsize: [14, 6]
+#   constrained_layout: True
+
+
+# num_traj_eval: 25 # NUmber of trajectory over which to estimate the prediction accuracy
+# # seed_traj_eval: 10 # Random seed for randomly pick the trajectory to evaluate
+# horizon_eval: 45 # Horizon of integration for prediction comparison
+# num_particles_eval: 100 # Number of particles for uncertainty
+# start_eval_strategy: first # first or random -> Strategy to pick the initial point in each trajectory selected
+# seed_eval: 15 # The seed for the probabilistic models: sde or jax
+
+
+# ########################## [Figure 12] In DATA No Side Info  #########################
+# eval_data: learned.pkl
+# # The models to show on the plot
+# model2plot: [cartpole_bb_learned_sde, cartpole_bb_learned_ode_sde]
+# # model2plot: [cartpole_bb_learned_si_sde, cartpole_bb_learned_ode_si_sde] #, gaussian_mlp_ensemble_cartpole_random]
+# indx2plot: 22 # The trajectory in the list of picked trajectories to plot for displaying state evolution
+
+# save_config:
+#   fname: 'Prediction_InData-NoSideInfo.png'
+#   dpi: 500
+# #####################################################################################
+
+
+# ########################## [Figure 13] Out Data Distribution  #########################
+# # eval_data: random.pkl
+# # # The models to show on the plot
+# # model2plot: [cartpole_bb_learned_sde, cartpole_bb_learned_ode_sde]
+# # # model2plot: [cartpole_bb_learned_si_sde, cartpole_bb_learned_ode_si_sde] #, gaussian_mlp_ensemble_cartpole_random]
+# # indx2plot: 10 # The trajectory in the list of picked trajectories to plot for displaying state evolution
+
+# # save_config:
+# #   fname: 'Prediction_OutData-NoSideInfo.png'
+# #   dpi: 500
+# #########################################################################################
+
+# #################### [Figure 14] Out Data Distribution Side Info  ####################
+# # eval_data: random.pkl
+# # # The models to show on the plot
+# # model2plot: [cartpole_bb_learned_si_sde, cartpole_bb_learned_ode_si_sde]
+# # # # model2plot: [cartpole_bb_learned_si_sde, cartpole_bb_learned_ode_si_sde] #, gaussian_mlp_ensemble_cartpole_random]
+# # indx2plot: 10 # The trajectory in the list of picked trajectories to plot for displaying state evolution
+
+# # save_config:
+# #   fname: 'Prediction_OutData-SideInfo.png'
+# #   dpi: 500
+# ######################################################################################
+
+# # ########################## [Figure In DATA Side Info  #########################
+# # eval_data: learned.pkl
+# # num_traj_eval: 25 # NUmber of trajectory over which to estimate the prediction accuracy
+# # # seed_traj_eval: 10 # Random seed for randomly pick the trajectory to evaluate
+# # horizon_eval: 45 # Horizon of integration for prediction comparison
+# # num_particles_eval: 100 # Number of particles for uncertainty
+# # start_eval_strategy: first # first or random -> Strategy to pick the initial point in each trajectory selected
+
+# # # The models to show on the plot
+# # model2plot: [cartpole_bb_learned_si_sde, cartpole_bb_learned_ode_si_sde]
+# # # model2plot: [cartpole_bb_learned_si_sde, cartpole_bb_learned_ode_si_sde] #, gaussian_mlp_ensemble_cartpole_random]
+# # seed_eval: 15 # The seed for the probabilistic models: sde or jax
+# # indx2plot: 22 # The trajectory in the list of picked trajectories to plot for displaying state evolution
+
+# # save_config:
+# #   fname: 'Prediction_InData-SideInfo.png'
+# #   dpi: 500
+# #########################################################################
+
+# # -----> END Figures 12, 13, and 14 experiments
+
+##################################################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# #################### Plotting Everything ######################
+# eval_data: learned.pkl
+# num_traj_eval: 25 # NUmber of trajectory over which to estimate the prediction accuracy
+# # seed_traj_eval: 10 # Random seed for randomly pick the trajectory to evaluate
+# horizon_eval: 45 # Horizon of integration for prediction comparison
+# num_particles_eval: 100 # Number of particles for uncertainty
+# start_eval_strategy: first # first or random -> Strategy to pick the initial point in each trajectory selected
+
+# # The models to show on the plot
+# model2plot: [cartpole_bb_learned_sde, cartpole_bb_learned_ode_sde, gaussian_mlp_ensemble_cartpole_random]
+# # model2plot: [cartpole_bb_learned_si_sde, cartpole_bb_learned_ode_si_sde] #, gaussian_mlp_ensemble_cartpole_random]
+# seed_eval: 15 # The seed for the probabilistic models: sde or jax
+# indx2plot: 22 # The trajectory in the list of picked trajectories to plot for displaying state evolution
+
+# save_config:
+#   fname: 'Prediction_InData-NoSideInfo-All.png'
+#   dpi: 500
+
+# global_legend: False
+# save_config_tex:
+#   fname: 'Prediction_GEvsNSDE.tex'
+# ################################################################
+
+
+# # ---> Uncomment here if plotting only the DaD term for a specific model 
+# # python plot_dad_term.py --fun dad
+
+# ############################ DAD term only #############################
 # # Range used for the mesh plot
 # thetarange: [-4.14, 4.14]
 # thetadotrange: [-20, 20]
@@ -351,7 +552,7 @@ save_config_tex:
 # # vmax: 0.2
 
 # plot_configs:
-#   - value: 'cartpole_bb_learned_v5_si_sde.pkl'
+#   - value: 'cartpole_bb_learned_sde.pkl'
 #     # train_data: 'learned.pkl'
 #     title: 'Density on learned.pkl'
 
@@ -359,108 +560,25 @@ save_config_tex:
 #   fname: 'dad_cartpole.png'
 #   dpi: 500
 
-# #####################################################################
-# ########### Plotting prediction error ############
+###########################################################################################
 
-# # Evaluation dataset
-# eval_data: learned.pkl
-# num_traj_eval: 10 # NUmber of trajectory over which to estimate the prediction accuracy
-# # seed_traj_eval: 10 # Random seed for randomly pick the trajectory to evaluate
-# horizon_eval: 100 # Horizon of integration for prediction comparison
-# num_particles_eval: 50 # Number of particles for uncertainty
-# start_eval_strategy: first # first or random -> Strategy to pick the initial point in each trajectory selected
+# ###################################################################################################
+# use_pdf: False
+# fraction: 1.2
 
-# # The models to show on the plot
-# model2plot: [cartpole_bb_learned_sde, gaussian_mlp_ensemble_cartpole_random]
-# seed_eval: 15 # The seed for the probabilistic models: sde or jax
-# indx2plot: 5 # The trajectory in the list of picked trajectories to plot for displaying state evolution
+# #################
+# model2plot: [cartpole_bb_random_sde, gaussian_mlp_ensemble_cartpole_random]
 
-# # The percentiles used when plotting the sde distribution
-# # alpha_percentiles: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]
-# # percentiles_array: [0.999, 0.99, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.25]
-
-# alpha_percentiles: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]
-# percentiles_array: [0.75, 0.70, 0.65, 0.6, 0.55, 0.53, 0.5, 0.4, 0.3, 0.25]
-
-# # Which style to use for standardt deviation
-# # std_style: perc75 # std or minmax or perc (for percentiles)
-# alpha_std: 0.3
-
-# ylim: 
-#   - null
-#   - null
-#   - [-1.1, 1.1]
-#   - [-1.1, 1.1]
-#   - null
-
-# # Plot general configurations
-# general_style:
-#   linewidth: 2.0
-
-# # Plot specifc configuration dictionary
 # curve_plot_style:
-#   cartpole_bb_learned_sde:
-#     label: "SDE Model"
-#     # color: "#ff7f0e"
-#     color: "#d62728"
-#     color_std: "#d62728"
-#     zorder: 60
+#   cartpole_bb_random_sde:
+#     title: Our model
 #   gaussian_mlp_ensemble_cartpole_random:
-#     label: "Probabilistic Ensemble"
-#     color: "#2ca02c"
-#     color_std: "#2ca02c"
-#     std_style: perc
-#     linestyle: '--'
-#     zorder: 10
-#   # gaussian_mlp_ensemble_cartpole_learned_PPO_gt:
-#   #   label: "Policy tested in environment"
-#   #   color: "#d62728"
-#   #   color_std: "#d62728"
-#   #   zorder: 20
-#   # gaussian_mlp_ensemble_cartpole_learned_PPO:
-#   #   label: "Policy trained with learned PE"
-#   #   color: "#9467bd"
-#   #   color_std: "#9467bd"
-#   #   linestyle: '--'
-#   #   zorder: 10
-#   groundtruth:
-#     label: "Groundtruth"
-#     color: "#1f77b4"
-#     linestyle: '--'
-#     zorder: 80
-
-# extra_args:
-#   legend_args:
-#     loc: 'upper center'
-#     bbox_to_anchor: [0.5, 1.0]
-#     ncol: 3
-
-# # The grid configuration and extra figure parameters like spacing etc..
-# fig_args:
-#   figsize: [14, 8]
-
-
-# save_config:
-#   fname: 'Prediction_PIvsSDE.png'
-#   dpi: 500
-
-# # save_config_tex:
-# #   fname: 'gap_nosideinfo_vs_sideinfo.tex'
-
-
-# ######################## Prediction uncertainty plot ############################
-
-# model2plot: [cartpole_bb_learned_sde, gaussian_mlp_ensemble_cartpole_learned]
-
-# curve_plot_style:
-#   cartpole_bb_learned_sde:
-#     title: SDE
-#   gaussian_mlp_ensemble_cartpole_learned:
-#     title: Probabilistic Ensemble
+#     title: Gaussian ensemble
 
 # # Range used for the mesh plot
 # thetarange: [-3.9, 3.9]
 # thetadotrange: [-15, 15]
+
 # # Number of grids on the axes
 # num_grid_theta: 100
 # num_grid_thetadot: 100
@@ -471,29 +589,18 @@ save_config_tex:
 # # Seed for operations related to the density estimation
 # seed_mesh: 10
 
-# training_dataset_config:
-#   label : 'Dataset'
-#   color : 'lavender'
-#   marker: 'x'
-#   markersize : 8 
-#   alpha : 1.0
-#   linestyle : 'None'
-#   zorder : 100
-
-# mesh_args:
-#   cmap: viridis
-#   shading: gouraud
-
-# colorbar_args:
-#   shrink: 0.95
-#   # extend: both
-#   pad: 0.01
-
 # extra_args:
 #   title_right_args:
 #     rotation: -90
 #     size: large
-#     labelpad: 15
+#     labelpad: 12
+#   legend_args:
+#     markerscale: 3
+#     fancybox: False
+#     frameon: False
+#     handletextpad: -0.5
+#     loc: upper center
+#     bbox_to_anchor: [0.2, 1.0]
 
 # # The list of models to plot in the configuration (usually a grid) they need to be plotted
 # fig_args:
@@ -502,18 +609,16 @@ save_config_tex:
 #   ncols: 2
 #   sharex: True
 #   sharey: True
-#   constrained_layout: True
 
 # # # Normalize mesh
-# # normalize_mesh: True
-
-# # Filename of the training dataset used for each model to plo
-# train_data: 'learned.pkl'
-
+# normalize_mesh: True
 # # vmin: 0
 # # vmax: 0.2
 
+# # Filename of the training dataset used for each model to plo
+# train_data: 'random.pkl'
 
 # save_config:
-#   fname: 'uncertainty_PEvsSDE.png'
+#   fname: 'Unc_random_GEvsSDE.png'
 #   dpi: 500
+# #####################
