@@ -1,5 +1,3 @@
-# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python cartpole_sde.py --fun train_sde --cfg cartpole_sde.yaml --out cartpole_bb
-
 # Training and testing data trajectory
 data_dir: learned.pkl
 # data_dir: random.pkl
@@ -27,10 +25,8 @@ model:
     activation_fn: 'tanh'
 
   # A priori knowledge of the noise distribution over the given prior dynamics knowledge
-  noise_prior_params: [0.005, 0.05, 0.004, 0.01] # To eddit
-  # # Comment line above and uncomment line below for ODE
-  # noise_prior_params: [0.,0, 0, 0] # neural ODE case
-  side_info: True # Inject euler-lagrange side information if True
+  noise_prior_params: [0.,0, 0, 0] # neural ODE case
+  side_info: False # Inject euler-lagrange side information if True
 
   # Is the noise term dependent on the control? Does the density needs to be estimated by merging state and control?
   control_dependent_noise: False # If not specified, False is the default value
@@ -41,26 +37,6 @@ model:
   # x: 0, vx: 1, sin(theta): 2, cos(theta): 3, theta_dot: 4
   state_scaling: [9, 5, 1, 10] # Learned.pkl maximum
   # state_scaling: [31, 14, 1, 13.0] # Random.pkl maximum
-
-  # Comment this key/values for ODE fitting
-  diffusion_density_nn:
-    # All inputs are contributing to the noise
-    # Inputs that contribute to the noise estimation
-    # Inputs to dad term are [xdot, sin(theta), cos(theta), theta_dot]
-    indx_noise_in: [1, 2, 3] # If not specified, it is all the inputs
-
-    # The learned noise only operates on this set of outputs
-    indx_noise_out: [1, 3] # If not specified, it is all the putputs
-
-    # Density scaler function -> learn heteregeous noise or homogeneous noise with none type
-    scaler_nn:
-      type: scaler
-      init_value: 0.01
-    
-    density_nn:
-      init_value: 0.1
-      activation_fn: swish
-      hidden_layers: [32, 32]
   
   # Stepsize for integration
   stepsize: 0.02
@@ -117,9 +93,6 @@ sde_loss:
 
   # Penalty on the local strong convexity constraints
   pen_density_scvex: 1.0
-
-  # Regularization penalty default value for all parameters
-  pen_weights: 1.0e-3
 
   # Penalty on mu learnt
   pen_mu_type: lin_inv

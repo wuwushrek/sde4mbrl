@@ -1,3 +1,6 @@
+""" Script to train a Probabilistic Ensemble dynamics model on a dataset.
+The configuration for the models are given in config/gaussian_mlp_ensemble_cartpole_config.py
+"""
 import torch
 
 import mbrl.util.common as common_utils
@@ -80,13 +83,23 @@ def run_training(cfg, data_file_name, test_data_file_name='learned.pkl', seed=42
     return train_losses, val_losses
 
 if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Train a Probabilistic Ensemble dynamics model on a dataset')
+    parser.add_argument('--data', type=str, default='learned.pkl', help='Name of the data file to train on')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--save_results', type=bool, default=True, help='Whether to save the results')
+    args = parser.parse_args()
+
     from config.gaussian_mlp_ensemble_cartpole_config import ensemble_cfg as cfg
-    seed = 42
+    
+    # Seed number
+    seed = args.seed
 
     data_dir = os.path.abspath(os.path.join(os.path.curdir, 'my_data'))
     
-    data_file_name = 'learned.pkl'
-    test_data_file_name = 'learned.pkl'
+    data_file_name = args.data
+    test_data_file_name = data_file_name
     
     print("Training on {}".format(data_file_name))
     

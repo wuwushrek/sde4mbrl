@@ -1,3 +1,5 @@
+""" Just another scroptto check out CEM performance on CartPole. 
+"""
 import hydra
 
 from tqdm import tqdm

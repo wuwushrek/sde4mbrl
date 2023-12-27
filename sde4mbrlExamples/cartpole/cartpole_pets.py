@@ -1,3 +1,5 @@
+""" Script to test PETS on the CartPole environment. Used as a baseline to validate MBRLLib.
+"""
 from IPython import display
 import matplotlib as mpl
 import matplotlib.pyplot as plt

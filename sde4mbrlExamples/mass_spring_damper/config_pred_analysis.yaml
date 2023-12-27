@@ -185,6 +185,7 @@ save_config:
   dpi: 500
 
 
+# -----> To uncomment for Figure 5 or Figure 9 experiments
 
 # #############################################################################################
 # ################# Plotting state evolution wrt neural ode and groundtruth ###################
@@ -285,6 +286,7 @@ save_config:
 # #   fname: 'Prediction_NODEvsNSDE.tex'
 # ###################################################################################################
 
+# END -----> To uncomment for Figure 5 or Figure 9 experiments
 
 
 # # Format for learned models to plot XX__MSD_XX_XX_XX

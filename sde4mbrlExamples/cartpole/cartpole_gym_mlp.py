@@ -1,3 +1,7 @@
+"""
+This file contains the code to create a gym environment for the cartpole problem when the model is a Gaussian MLP
+The Gym environment load the models from a file and use them to create the step functions that's used for RL.
+"""
 import os
 
 import numpy as np

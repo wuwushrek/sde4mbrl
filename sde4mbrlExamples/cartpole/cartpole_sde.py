@@ -16,9 +16,10 @@ import pickle
 from functools import partial
 
 
+########################### SDE MODEL OF THE CARTPOLE SYSTEM #############################
 class CartPoleSDE(ControlledSDE):
-    """ An SDE and ODE model of the mass spring damper system.
-        The parameters of the model are usually defined in a yaml file.
+    """ An SDE or ODE model of the CartPole System.
+        The parameters of the model are usually defined in a yaml file, and load through params.
     """
     def __init__(self, params, name=None):
         # Define the params here if needed before initialization
@@ -31,7 +32,9 @@ class CartPoleSDE(ControlledSDE):
         # This function setup the parameters of the unknown neural networks and the residual network
         self.init_residual_networks()
 
+        # A scaling factor for the state before passing it to the NNs
         self.state_scaling = jnp.array(self.params.get('state_scaling', [1.0] * self.n_x))
+
         # In case scaling factor is give, we also need to ensure scaling diffusion network inputs
         if 'state_scaling' in self.params:
             # self.reduced_state = lambda x : jnp.array([x[1]/self.state_scaling[1], jnp.sin(x[2]), jnp.cos(x[2]), x[-1]/self.state_scaling[-1]])
@@ -39,11 +42,13 @@ class CartPoleSDE(ControlledSDE):
     
 
     def prior_diffusion(self, x, u, extra_args=None):
-        # Set the prior to a constant noise as defined in the yaml file
+        """ Desired diffusion terms (uncertainty) of the SDE outside of the traning dataset
+        """
         return jnp.array(self.params['noise_prior_params'])
 
     def state_transform_for_loss(self, x):
-        """ A function to transform the state for loss computation
+        """ A function to transform the state for loss computation. We choose to perform the L2 loss on the
+            state and the cos and sin of all the angles instead of the angles themselves.
         """
         return jnp.concatenate([x[...,0:1], x[...,1:2], jnp.sin(x[...,2:3]), jnp.cos(x[...,2:3]), x[...,3:4]], axis=-1)
     
@@ -58,17 +63,19 @@ class CartPoleSDE(ControlledSDE):
         x_sc, xdot_sc, theta_sc, theta_dot_sc = x / self.state_scaling
         uval = u[0]
 
-        # Scaling factor
+        # Scaling factor for the output of the NNs. The intention here is that the NNs by themselves should output low values
+        # This is extracted from the data by doing finite difference on the state
         nn_out_scale = jnp.array(self.params['nn_out_scale'])
 
         # If side information is not included
         if not self.params.get('side_info', False):
-            # Scaled state
+            # Compute the vector field, scale it back and returns it
             xdotdot, theta_dotdot = nn_out_scale * self.residual_nn(jnp.array([sin_theta_sc, cos_theta_sc, theta_dot_sc, uval]))
             return jnp.array([xdot, xdotdot, theta_dot, theta_dotdot])
         
-        # If side information is included
+        # If side information is included, enforce control affine dynamics
         xdotdot, theta_dotdot = self.residual_nn(jnp.array([sin_theta_sc, cos_theta_sc, theta_dot_sc]))
+
         # Compute the control
         ctrl_eff = self.control_nn(jnp.array([cos_theta_sc, cos_theta_sc**2])) * uval
         xdotdot = nn_out_scale[0] * (xdotdot + ctrl_eff[0])
@@ -98,79 +105,13 @@ class CartPoleSDE(ControlledSDE):
                                             w_init=hk.initializers.RandomUniform(-init_value_ctrl, init_value_ctrl),
                                             name = 'control_nn')
 
-#### GYm wrapper environment for the cartpole SDE model ####
-def cartpole_sde_gym(filename='my_models/cartpole_bb_sde.pkl', num_particles=1, tau=0.02,
-                        jax_seed= 10, use_gpu=True, jax_gpu_mem_frac=0.2, **kwargs):
+################### SET OF FUNCTIONS TO LOAD THE MODEL ############################
+        # Load a pkl file
+def _load_pkl(filename):
+    with open(filename, 'rb') as f:
+        return pickle.load(f)
     
-    # Some imports
-    import time
-    from sde4mbrlExamples.cartpole.modified_cartpole_continuous import CartPoleEnv
 
-    if use_gpu:
-        os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = str(jax_gpu_mem_frac)
-        backend = 'gpu'
-    else:
-        backend = 'cpu'
-
-    # Find the file
-    model_path = os.path.expanduser(filename)
-    # Load the SDE model from the file
-    my_sde = load_predictor_function(model_path, prior_dist=False, nonoise=False,
-                                modified_params ={'horizon' : 1, 'num_particles' : num_particles, 'stepsize': tau}, 
-                                return_control=False, 
-                                return_time_steps=False)
-    
-    def _my_pred_fn(x, u, _rng):
-        """ Return the predicted next state
-        """
-        _xpred = my_sde(x, u, _rng)
-        return jnp.mean(_xpred[:,-1,:], axis=0), jnp.std(_xpred[:,-1,:], axis=0)
-    
-    # Initialize the random number generator
-    _rng = jax.random.PRNGKey(jax_seed)
-    # Initialize the state
-    _x0 = np.array([0.0, 0.0, np.pi, 0.0])
-    _u0 = np.array([0.0])
-    # We are going to compile ahead of time the function
-    _current_time = time.time()
-    sde_pred_fn = jax.jit(_my_pred_fn, backend=backend).lower(_x0, _u0, _rng).compile()
-    print('Compilation time of SDE: {}'.format(time.time() - _current_time))
-
-    # We print the evaluation time
-    _current_time = time.time()
-    _xpred, _xstd = sde_pred_fn(_x0, _u0, _rng)
-    _xpred.block_until_ready()
-    print(_xpred.shape, _xstd.shape)
-    print('Evaluation time of SDE: {}'.format(time.time() - _current_time))
-
-    # We create the gym environment
-    class CartPoleSDEEnv(CartPoleEnv):
-        def __init__(self, **kwargs):
-            super().__init__(**kwargs)
-            self.reset_model_seed()
-            self._sde_pred_fn = sde_pred_fn
-
-        def step_dynamics(self, action):
-            # We use the SDE model to predict the next state
-            action = np.array([action,])
-            assert self.state is not None, 'The state must be initialized'
-            assert action.shape == (1,), 'The action must be a scalar'
-            self._rng, next_rng = jax.random.split(self._rng)
-            _xpred, _xstd = self._sde_pred_fn(self.state, action, next_rng)
-            # We update the state
-            self.state = np.array(_xpred)
-            self._xstd = np.array(_xstd)
-        
-        def get_obs(self, state):
-            x, x_dot, theta, theta_dot = state
-            return np.array((x, x_dot, np.sin(theta), np.cos(theta), theta_dot))
-        
-        def reset_model_seed(self,):
-            self._rng = jax.random.PRNGKey(jax_seed)
-
-    return CartPoleSDEEnv(**kwargs)
-
-############# SET OF FUNCTIONS TO TRAIN THE MODEL #####################
 def load_predictor_function(learned_params_dir, prior_dist=False, nonoise=False, modified_params ={}, 
                             return_control=False, return_time_steps=False):
     """ Create a function to sample from the prior distribution or
@@ -251,11 +192,81 @@ def load_learned_diffusion(model_path, num_samples=1):
     
     return diffusion_fn
 
-# Load a pkl file
-def _load_pkl(filename):
-    with open(filename, 'rb') as f:
-        return pickle.load(f)
+################# GYm wrapper environment for the cartpole SDE model #################
+#### GYm wrapper environment for the cartpole SDE model ####
+def cartpole_sde_gym(filename='my_models/cartpole_bb_sde.pkl', num_particles=1, tau=0.02,
+                        jax_seed= 10, use_gpu=True, jax_gpu_mem_frac=0.2, **kwargs):
     
+    # Some imports
+    import time
+    from sde4mbrlExamples.cartpole.modified_cartpole_continuous import CartPoleEnv
+
+    if use_gpu:
+        # TODO: This memory fraction should not work, cause Jax has already imported
+        os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = str(jax_gpu_mem_frac)
+        backend = 'gpu'
+    else:
+        backend = 'cpu'
+
+    # Find the file
+    model_path = os.path.expanduser(filename)
+    # Load the SDE model from the file
+    my_sde = load_predictor_function(model_path, prior_dist=False, nonoise=False,
+                                modified_params ={'horizon' : 1, 'num_particles' : num_particles, 'stepsize': tau}, 
+                                return_control=False, 
+                                return_time_steps=False)
+    
+    def _my_pred_fn(x, u, _rng):
+        """ Return the predicted next state
+        """
+        _xpred = my_sde(x, u, _rng)
+        return jnp.mean(_xpred[:,-1,:], axis=0), jnp.std(_xpred[:,-1,:], axis=0)
+    
+    # Initialize the random number generator
+    _rng = jax.random.PRNGKey(jax_seed)
+    # Initialize the state
+    _x0 = np.array([0.0, 0.0, np.pi, 0.0])
+    _u0 = np.array([0.0])
+    # We are going to compile ahead of time the function
+    _current_time = time.time()
+    sde_pred_fn = jax.jit(_my_pred_fn, backend=backend).lower(_x0, _u0, _rng).compile()
+    print('Compilation time of SDE: {}'.format(time.time() - _current_time))
+
+    # We print the evaluation time
+    _current_time = time.time()
+    _xpred, _xstd = sde_pred_fn(_x0, _u0, _rng)
+    _xpred.block_until_ready()
+    print(_xpred.shape, _xstd.shape)
+    print('Evaluation time of SDE: {}'.format(time.time() - _current_time))
+
+    # We create the gym environment
+    class CartPoleSDEEnv(CartPoleEnv):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.reset_model_seed()
+            self._sde_pred_fn = sde_pred_fn
+
+        def step_dynamics(self, action):
+            # We use the SDE model to predict the next state
+            action = np.array([action,])
+            assert self.state is not None, 'The state must be initialized'
+            assert action.shape == (1,), 'The action must be a scalar'
+            self._rng, next_rng = jax.random.split(self._rng)
+            _xpred, _xstd = self._sde_pred_fn(self.state, action, next_rng)
+            # We update the state
+            self.state = np.array(_xpred)
+            self._xstd = np.array(_xstd)
+        
+        def get_obs(self, state):
+            x, x_dot, theta, theta_dot = state
+            return np.array((x, x_dot, np.sin(theta), np.cos(theta), theta_dot))
+        
+        def reset_model_seed(self,):
+            self._rng = jax.random.PRNGKey(jax_seed)
+
+    return CartPoleSDEEnv(**kwargs)
+
+############# SET OF FUNCTIONS TO TRAIN THE MODEL #####################
 
 def load_trajectory(filename):
     """Load a trajectory from a pkl file.
@@ -278,7 +289,7 @@ def main_train_sde(yaml_cfg_file, output_file):
     # Load the yaml file
     cfg_train = load_yaml(yaml_cfg_file)
 
-    # Obtain the path to the log data
+    # Obtain the path to the logs data
     logs_dir = cfg_train['data_dir']
     if type(logs_dir) != list:
         logs_dir = [logs_dir]
@@ -289,14 +300,18 @@ def main_train_sde(yaml_cfg_file, output_file):
     # Split the data into train and test according to the ratio in the yaml file
     ratio_test = cfg_train['ratio_test']
     ratio_seed = cfg_train['ratio_seed']
+
     # Obtain the number of testing trajectories and make sure it is always greater than 1 and less than the total number of trajectories
     num_test_traj = max(1, min(int(ratio_test * len(full_data)), len(full_data)))
     np.random.seed(ratio_seed)
+
     # Pick indexes for the test data
     test_idx = np.random.choice(len(full_data), num_test_traj, replace=False)
+
     # Remove the test data from the full data if requested
     if cfg_train.get('remove_test_data', False):
         full_data = [full_data[i] for i in range(len(full_data)) if i not in test_idx]
+
     # Extract the test data
     test_data = [full_data[i] for i in test_idx]
     train_data = full_data
@@ -314,11 +329,12 @@ def main_train_sde(yaml_cfg_file, output_file):
     print('Maximum in absolute value of each state of the full data')
     print(np.max(np.abs(np.concatenate([x['y'] for x in train_data])), axis=0))
 
+    # Neural network input scaling factor from data, if specified
     if 'data_state_scaling' in cfg_train['model']:
         cfg_train['model']['state_scaling'] = list(np.max(np.abs(np.concatenate([x['y'] for x in full_data])), axis=0))
         print('State scaling is set to {}'.format(cfg_train['model']['state_scaling']))
     
-    # Vector field scaling factor from data
+    # Vector field output scaling factor from data, if specified
     if 'nn_out_scaling' in cfg_train['model']:
         _grad_data = np.abs([ np.gradient(x['y'][:,[1,-1]], cfg_train['sde_loss']['data_stepsize'], axis=0) for x in full_data])
         _grad_data = np.max(np.max(_grad_data, axis=0), axis=0)
@@ -343,8 +359,10 @@ if __name__ == '__main__':
     parser.add_argument('--fun', type=str, default='train_sde', help='Path to the yaml training configuration file')
     parser.add_argument('--cfg', type=str, default='cartpole_sde.yaml', help='Path to the yaml training configuration file')
     parser.add_argument('--out', type=str, default='cartpole', help='Name of the output file')
+
     # Parse the arguments
     args = parser.parse_args()
+    
     if args.fun == 'train_sde':
         # Call the main function
         main_train_sde(args.cfg, args.out)

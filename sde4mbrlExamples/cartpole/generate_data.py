@@ -1,3 +1,7 @@
+""" Script to generate the dataset for the cartpole experiments.
+We generate too dataset called learned.pkl and random.pkl. 
+random.pkl is generated using a random policy and learned.pkl is generated using a pre-trained sub-optimal  policy.
+"""
 from modified_cartpole_continuous import CartPoleEnv
 from skrl.envs.torch import wrap_env
 
