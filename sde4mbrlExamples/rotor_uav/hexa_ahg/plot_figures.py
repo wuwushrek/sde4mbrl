@@ -1,3 +1,5 @@
+""" Mainscript used for plotting the hexacopter results from the real world experiment.
+"""
 import os
 
 # MPC seems to be faster on cpu because of the loop

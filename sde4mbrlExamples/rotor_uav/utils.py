@@ -1,7 +1,9 @@
-import numpy as np
+"""
+    -   Utilities for converting between coordinate frames and quaternions.
+    -   Load and parse saved trajectories from .ulog files.
+"""
 
-# import copy
-# import collections
+import numpy as np
 import os
 
 ################################ Qauternion and Conversion Utilities ################################
@@ -10,6 +12,12 @@ q_FLU_to_FRD = np.array([0, 1., 0, 0])
 
 def quatmult( a, b, array_lib=np):
     """Multiply two quaternions.
+        Args: 
+            a (list or array): Quaternion [w, x, y, z].
+            b (list or array): Quaternion [w, x, y, z].
+            array_lib (numpy): Numpy or Jax.
+        Returns:
+            array: Quaternion [w, x, y, z].
     """
     w1, x1, y1, z1 = a
     w2, x2, y2, z2 = b
@@ -21,31 +29,48 @@ def quatmult( a, b, array_lib=np):
 
 def quatinv( a, array_lib=np):
     """Inverse a quaternion.
+        Args:
+            a (list or array): Quaternion [w, x, y, z].
+            array_lib (numpy): Numpy or Jax.
+        Returns:
+            array: Quaternion [w, x, y, z].
     """
     w, x, y, z = a
     return array_lib.array([w, -x, -y, -z])
 
 def quat_rotatevector(q, v, array_lib=np):
-    """ Rotate a vector (numpy) by a quaternion (numpy) """
+    """ Rotate a vector (numpy) by a quaternion (numpy) 
+        Args:
+            q (list or array): Quaternion [w, x, y, z].
+            v (list or array): Vector [x, y, z].
+            array_lib (numpy): Numpy or Jax.
+        Returns:
+            array: Vector [x, y, z].
+    """
     v = array_lib.array([0., v[0], v[1], v[2]])
     return quatmult(quatmult(q, v, array_lib), quatinv(q, array_lib), array_lib)[1:]
 
 def quat_rotatevectorinv(q, v, array_lib=np):
     """Rotate a vector (numpy) by a quaternion (numpy) in the opposite direction.
+        Args:
+            q (list or array): Quaternion [w, x, y, z].
+            v (list or array): Vector [x, y, z].
+            array_lib (numpy): Numpy or Jax.
+        Returns:
+            array: Vector [x, y, z].
     """
     v = array_lib.array([0., v[0], v[1], v[2]])
     return quatmult(quatinv(q, array_lib), quatmult(v, q, array_lib), array_lib)[1:]
 
 def quat_from_euler(roll, pitch, yaw, array_lib=np):
     """Convert Euler angles to quaternion.
-
-    Args:
-        roll (float): Roll angle in radians.
-        pitch (float): Pitch angle in radians.
-        yaw (float): Yaw angle in radians.
-
-    Returns:
-        list: Quaternion [w, x, y, z].
+        Args:
+            roll (float): Roll angle in radians.
+            pitch (float): Pitch angle in radians.
+            yaw (float): Yaw angle in radians.
+            array_lib (module): Numpy or jax.
+        Returns:
+            list: Quaternion [w, x, y, z].
     """
     cy = array_lib.cos(yaw * 0.5)
     sy = array_lib.sin(yaw * 0.5)
@@ -61,12 +86,11 @@ def quat_from_euler(roll, pitch, yaw, array_lib=np):
 
 def quat_to_euler(q, array_lib=np):
     """Convert quaternion to Euler angles.
-
-    Args:
-        q (list): Quaternion [w, x, y, z].
-
-    Returns:
-        list: Euler angles [roll, pitch, yaw].
+        Args:
+            q (list or array): Quaternion [w, x, y, z].
+            array_lib (module): Numpy or jax.
+        Returns:
+            list: Euler angles [roll, pitch, yaw].
     """
     w, x, y, z = q
     roll = array_lib.arctan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y))
@@ -78,12 +102,11 @@ def quat_to_euler(q, array_lib=np):
 
 def quat_get_yaw(q, array_lib=np):
     """Get yaw angle from quaternion.
-
-    Args:
-        q (list): Quaternion [w, x, y, z].
-
-    Returns:
-        float: Yaw angle in radians.
+        Args:
+            q (list): Quaternion [w, x, y, z].
+            array_lib (module): Numpy or jax.
+        Returns:
+            float: Yaw angle in radians.
     """
     w, x, y, z = q
     return array_lib.arctan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
@@ -91,12 +114,11 @@ def quat_get_yaw(q, array_lib=np):
 
 def enu_to_ned_orientation(q, array_lib=np):
     """Convert orientation from ENU (FLU) to NED.
-
-    Args:
-        q (list): Quaternion [w, x, y, z].
-
-    Returns:
-        list: Quaternion [w, x, y, z].
+        Args:
+            q (list): Quaternion [w, x, y, z].
+            array_lib (module): Numpy or jax.
+        Returns:
+            list: Quaternion [w, x, y, z].
     """
     q_FLU_to_NED = quatmult(q_ENU_to_NED, q, array_lib)
     return quatmult(q_FLU_to_NED, quatinv(q_FLU_to_FRD,array_lib), array_lib)
@@ -104,59 +126,55 @@ def enu_to_ned_orientation(q, array_lib=np):
 def flu_to_frd_conversion(v, array_lib=np):
     """Convert orientation from FLU to FRD.
        Typically use for converting body frame enu to ned or inverse
-    Args:
-        v (list): A vector [x, y, z].
-
-    Returns:
-        list: A vector in frd frame
+        Args:
+            v (list): A vector [x, y, z].
+            array_lib (module): Numpy or jax.
+        Returns:
+            list: A vector in frd frame
     """
     return quat_rotatevector(q_FLU_to_FRD, v, array_lib)
 
 def body_to_inertial_frame(p, q, array_lib=np):
     """Convert position from body frame to inertial frame.
-
-    Args:
-        p (list): Position [x, y, z].
-        q (list): Quaternion [w, x, y, z].
-
-    Returns:
-        list: Position [x, y, z].
+        Args:
+            p (list): Position [x, y, z].
+            q (list): Quaternion [w, x, y, z].
+            array_lib (module): Numpy or jax.
+        Returns:
+            list: Position [x, y, z].
     """
     return quat_rotatevector(q, p, array_lib)
 
 def inertial_to_body_frame(p, q, array_lib=np):
     """Convert position from inertial frame to body frame.
-
-    Args:
-        p (list): Position [x, y, z].
-        q (list): Quaternion [w, x, y, z].
-
-    Returns:
-        list: Position [x, y, z].
+        Args:
+            p (list): Position [x, y, z].
+            q (list): Quaternion [w, x, y, z].
+            array_lib (module): Numpy or jax.
+        Returns:
+            list: Position [x, y, z].
     """
     return quat_rotatevectorinv(q, p, array_lib)
 
 def enu_to_ned_position(p, array_lib=np):
     """Convert position from ENU (FLU) to NED.
-
-    Args:
-        p (list): Position [x, y, z].
-
-    Returns:
-        list: Position [x, y, z].
+        Args:
+            p (list or array): Position [x, y, z].
+            array_lib (module): Numpy or jax.
+        Returns:
+            list: Position [x, y, z].
     """
     return quat_rotatevector(q_ENU_to_NED, p, array_lib)
 
 def enu_euler_to_ned_euler(roll, pitch, yaw, array_lib=np):
     """Convert Euler angles from ENU (FLU) to NED.
-
-    Args:
-        roll (float): Roll angle in radians.
-        pitch (float): Pitch angle in radians.
-        yaw (float): Yaw angle in radians.
-
-    Returns:
-        list: Euler angles [roll, pitch, yaw].
+        Args:
+            roll (float): Roll angle in radians.
+            pitch (float): Pitch angle in radians.
+            yaw (float): Yaw angle in radians.
+            array_lib (module): Numpy or jax.
+        Returns:
+            list: Euler angles [roll, pitch, yaw].
     """
     q = quat_from_euler(roll, pitch, yaw, array_lib)
     q = enu_to_ned_orientation(q, array_lib)
@@ -164,24 +182,21 @@ def enu_euler_to_ned_euler(roll, pitch, yaw, array_lib=np):
 
 def enu_to_ned_z(z):
     """Convert z position from ENU (FLU) to NED.
-
-    Args:
-        z (float): Z position.
-
-    Returns:
-        float: Z position.
+        Args:
+            z (float): Z position.
+        Returns:
+            float: Z position.
     """
     return -z
 
-# def ned2enu(x):
-#     return jnp.concatenate((ned_to_enu_position(x[:3], jnp),
-#                             ned_to_enu_position(x[3:6],jnp),
-#                             ned_to_enu_orientation(x[6:10], jnp),
-#                             frd_to_flu_conversion(x[10:], jnp)
-#                             )
-#             )
-
 def enu2ned(x, array_lib=np):
+    """Convert full state vector from ENU (FLU) to NED.
+        Args:
+            x (list or array): State vector [x, y, z, vx, vy, vz, qw, qx, qy, qz, wx, wy, wz].
+            array_lib (module): Numpy or jax.
+        Returns:
+            list or array: State vector [x, y, z, vx, vy, vz, qw, qx, qy, qz, wx, wy, wz].
+    """
     return array_lib.concatenate((enu_to_ned_position(x[:3], array_lib),
                             enu_to_ned_position(x[3:6],array_lib),
                             enu_to_ned_orientation(x[6:10], array_lib),
@@ -189,14 +204,19 @@ def enu2ned(x, array_lib=np):
                             )
             )
 
+# Ned to enu conversion of the position
 ned_to_enu_position = enu_to_ned_position
 
+# Ned to enu conversion of the orientation
 ned_to_enu_orientation = enu_to_ned_orientation
 
+# Ned to enu conversion of the position z
 ned_to_enu_z = enu_to_ned_z
 
+# Ned to enu conversion of Euler angles
 ned_euler_to_enu_euler = enu_euler_to_ned_euler
 
+# FRD to FLU conversion
 frd_to_flu_conversion = flu_to_frd_conversion
 
 ############################ Loading trajectories utilities ############################
@@ -219,7 +239,19 @@ frd_to_flu_conversion = flu_to_frd_conversion
 
 def load_trajectory(filename):
     """ Load the trajectory from a csv file
+        The trajectory is typically given as a time state list, from a trajectory optimization/generated trajectory
         return the dictionary of the trajectory using numpy array
+        Args:
+            filename (str): The path to the csv file
+        Returns:
+            dict: The dictionary containing the trajectory 
+            {"t": array, "x": array, "y": array, "z": array, 
+                "vx": array, "vy": array, "vz": array, 
+                "qw": array, "qx": array, "qy": array, "qz": array, 
+                "wx": array, "wy": array, "wz": array,
+                "m1": array, "m2": array, "m3": array, "m4": array,
+                and potentially "roll", "pitch", "yaw", "m5", "m6", "m7", "m8"
+            }
     """
     import pandas as pd
     df = pd.read_csv(os.path.expanduser(filename))
@@ -230,38 +262,6 @@ def load_trajectory(filename):
         dict_traj[key] = np.array(dict_traj[key])
     return dict_traj
 
-# def update_params(d, u):
-#     """Update a dictionary with multiple levels
-
-#     Args:
-#         d (TYPE): The dictionary to update
-#         u (TYPE): The dictionary that contains keys/values to add to d
-
-#     Returns:
-#         TYPE: The modified dictionary d
-#     """
-#     d = copy.deepcopy(d)
-#     for k, v in u.items():
-#         if isinstance(v, collections.abc.Mapping):
-#             d[k] = update_params(d.get(k, {}), v)
-#         else:
-#             d[k] = v
-#     return d
-
-# def apply_fn_to_allleaf(fn_to_apply, types_change, dict_val):
-#     """Apply a function to all the leaf of a dictionary
-#     """
-#     res_dict = {}
-#     for k, v in dict_val.items():
-#         # if the value is a dictionary, convert it recursively
-#         if isinstance(v, dict):
-#             res_dict[k] = apply_fn_to_allleaf(fn_to_apply, types_change, v)
-#         elif isinstance(v, types_change):
-#             res_dict[k] = fn_to_apply(v)
-#         else:
-#             res_dict[k] = v
-#     return res_dict
-
 def find_consecutive_true(metrics, min_length=-1):
     """Return the set of indices of minimum length 'min_length' for which
     the boolean array 'metrics' is True.
@@ -269,17 +269,15 @@ def find_consecutive_true(metrics, min_length=-1):
              or where the model is actually invertible
 
     Args:
-        metrics (TYPE): Description
-        min_length (TYPE, optional): Description
+        metrics (TYPE): Boolean array
+        min_length (TYPE, optional): Minimum length of the consecutive True values
 
     Returns:
         TYPE: Description
     """
     full_auto = metrics
     section_inds_ = np.split(np.r_[:len(full_auto)], np.where(np.diff(full_auto) != 0)[0]+1)
-
     full_auto_inds = []
-
     for inds_ in section_inds_:
         if full_auto[inds_[0]] and len(inds_) > min_length:
             full_auto_inds.append(inds_)
@@ -287,20 +285,22 @@ def find_consecutive_true(metrics, min_length=-1):
 
 def parse_ulog(ulog_file, topic='mpc_full_state', outlier_cond=lambda d : d['z']>0.1, min_length=500, mavg_dict={}):
     """Parse the ulog file and return the data in a dictionary.
-
-    Args:
-        ulog_file (str): Path to the ulog file.
-        topic_list (list): List of topics to be parsed.
-
-    Returns:
-        dict: Dictionary of the parsed data.
-    """
-    # Import the ulog module
+        Args:
+            ulog_file (str): Path to the ulog file.
+            topic_list (list): List of topics to be parsed -> We only use mpc_full_state
+            outlier_cond (function): Function that provides conditions for removing outliers or data of no interest.
+            min_length (int): Minimum length to retur of segment that satisfies the outlier condition.
+            mavg_dict (dict): Dictionary and parameters of the state to which we want to apply a moving average filter.
+        Returns:
+            dict: Dictionary of the parsed data.
+        """
+    # Import the ulog module to not make the module a requirement
     from pyulog.core import ULog
     from tqdm.auto import tqdm
 
     # Parse the ulog file
     ulog = ULog(os.path.expanduser(ulog_file), message_name_filter_list=[topic], disable_str_exceptions=True)
+    
     # Check if the ulog is valid and not empty
     if len(ulog.data_list) <= 0:
         raise ValueError("The ulog file is empty.")
@@ -311,13 +311,16 @@ def parse_ulog(ulog_file, topic='mpc_full_state', outlier_cond=lambda d : d['z']
     # Go through the message that has been saved
     msg = ulog.data_list[0]
 
+    # Save the time stamp in seconds
     res_dict['t'] = msg.data['timestamp_sample'] / 1e6
-    # # Compute the delta time
+
+    # Compute the delta time to check consistency in the data
     time_step = res_dict['t'][1:] - res_dict['t'][:-1]
+
     # Print the mean time step and the standard deviation
     print("Mean time step: {:.3f} s".format(np.mean(time_step)))
 
-    # Save each fill of the message
+    # Save all the keys except for the timestamp and timestamp_sample in the dictionary res_dict
     for msgname, msgdata in msg.data.items():
         # Pass the timestamp and timestamp_sample fields
         if msgname in ['timestamp', 'timestamp_sample']:
@@ -328,48 +331,41 @@ def parse_ulog(ulog_file, topic='mpc_full_state', outlier_cond=lambda d : d['z']
             continue
         res_dict[msgname] = msg_array
     
-    # Let's do some conversion
+    # Let's do some conversion depending on the state components
     # Check if x,y,z are in the message
     if 'x' in res_dict and 'y' in res_dict and 'z' in res_dict:
         # Convert them from NED to ENU
         for i in tqdm(range(len(res_dict['x'])), leave=False):
             res_dict['x'][i], res_dict['y'][i], res_dict['z'][i] = \
                 ned_to_enu_position([res_dict['x'][i], res_dict['y'][i], res_dict['z'][i]])
+            
     # Check if vx,vy,vz are in the message
     if 'vx' in res_dict and 'vy' in res_dict and 'vz' in res_dict:
         # Convert them from NED to ENU
         for i in tqdm(range(len(res_dict['vx'])), leave=False):
             res_dict['vx'][i], res_dict['vy'][i], res_dict['vz'][i] = \
                 ned_to_enu_position([res_dict['vx'][i], res_dict['vy'][i], res_dict['vz'][i]])
+            
     # Check if qw,qx,qy,qz are in the message
     if 'qw' in res_dict and 'qx' in res_dict and 'qy' in res_dict and 'qz' in res_dict:
         # Convert them from NED to ENU
         for i in tqdm(range(len(res_dict['qw'])), leave=False):
             res_dict['qw'][i], res_dict['qx'][i], res_dict['qy'][i], res_dict['qz'][i] = \
                 ned_to_enu_orientation([res_dict['qw'][i], res_dict['qx'][i], res_dict['qy'][i], res_dict['qz'][i]])
+            
     # Check if wx,wy,wz are in the message
     if 'wx' in res_dict and 'wy' in res_dict and 'wz' in res_dict:
         # Convert them from NED to ENU
         for i in tqdm(range(len(res_dict['wx'])), leave=False):
             res_dict['wx'][i], res_dict['wy'][i], res_dict['wz'][i] = \
                 frd_to_flu_conversion([res_dict['wx'][i], res_dict['wy'][i], res_dict['wz'][i]])
-        # # Check if wx is in mavg_dict, if yes, apply the moving average according to the value in mavg_dict
-        # if 'wx' in mavg_dict:
-        #     res_dict['wx'] = np.convolve(res_dict['wx'], np.ones((mavg_dict['wx'],))/mavg_dict['wx'], mode='same')
-        # # Check if wy is in mavg_dict, if yes, apply the moving average according to the value in mavg_dict
-        # if 'wy' in mavg_dict:
-        #     res_dict['wy'] = np.convolve(res_dict['wy'], np.ones((mavg_dict['wy'],))/mavg_dict['wy'], mode='same')
-        # # Check if wz is in mavg_dict, if yes, apply the moving average according to the value in mavg_dict
-        # if 'wz' in mavg_dict:
-        #     res_dict['wz'] = np.convolve(res_dict['wz'], np.ones((mavg_dict['wz'],))/mavg_dict['wz'], mode='same')
-    
+
     # Compute moving average for all the states in res_dict if present in mavg_dict
     for key in mavg_dict.keys():
         if key in res_dict:
             res_dict[key] = np.convolve(res_dict[key], np.ones((mavg_dict[key],))/mavg_dict[key], mode='same')
 
-    # Do some cleaning
-    # Remove values that are too closed to the ground
+    # Do some cleaning depending of the outlier condition
     if outlier_cond is not None:
         conseq_ind = find_consecutive_true(outlier_cond(res_dict), min_length=min_length)
         _res_list = []

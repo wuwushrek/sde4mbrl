@@ -1,6 +1,3 @@
-# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python sde_rotor_model.py --fun train_sde --cfg iris_sitl/optimizer_sde.yaml --out iris_sitl
-# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python sde_rotor_model.py --fun gen_traj --cfg iris_sitl/data_generation.yaml
-
 # The directory containing my_models and my_data
 vehicle_dir: ~/Documents/sde4mbrl/sde4mbrlExamples/rotor_uav/iris_sitl
 
@@ -8,7 +5,7 @@ vehicle_dir: ~/Documents/sde4mbrl/sde4mbrlExamples/rotor_uav/iris_sitl
 data_dir: trajs.pkl
 
 # # If few parameters were learnt using static matching of model of vector field and finite difference, we specify its name here
-learned_nominal: prior_iris_linear.yaml # a name of a learned .yaml file -> Generate this file using optimizer_prior or comment it if you don't want to learn a prior
+learned_nominal: prior_iris.yaml # a name of a learned .yaml file -> Generate this file using optimizer_prior or comment it if you don't want to learn a prior
 
 # Model parameters
 model:
@@ -17,9 +14,9 @@ model:
   n_y: 13
   n_u: 4
 
-  # A priori knowledge of the noise distribution over the given prior dynamics knowledge
-  # noise_prior_params: [0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0.0001, 0.0001, 0.0001, 0.0001, 0.01, 0.01, 0.01]
-  noise_prior_params: [0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0, 0, 0, 0, 0.05, 0.05, 0.05]
+  # User-desired noise in the dynamics outside of the training dataset
+  noise_prior_params: [0.001, 0.001, 0.001, 0.01, 0.01, 0.01, 0, 0, 0, 0, 0.05, 0.05, 0.02]
+  # # Uncomment below for ODE
   # noise_prior_params: [0., 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
   # This is not used when learned_nominal is not null
@@ -35,9 +32,9 @@ model:
     Iyy: 0.025
     Izz: 0.05
     fm_model:
-      order: 2
+      order: 1
       use_constant_term: True
-      assume_sym: True
+      assume_sym: False
 
   # This enforce that the init_params given by learned_nominal are fixed and not relearned
   fixed_init_params: False # Set this value to False if you want to relearn it. This value is ignored or set to Fals if learned_nominal is not given
@@ -46,10 +43,11 @@ model:
   control_dependent_noise: False # If not specified, False is the default value
   # stability: True
 
-  # Scaling factor for normalizing neural network inputs
+  # Scaling factor for normalizing neural network inputs -> Magnitude in the dataset
   # x: 0, y: 1, z: 2, vx: 3, vy: 4, vz: 5, qw: 6, qx: 7, qy: 8, qz: 9, wx: 10, wy: 11, wz: 12
-  state_scaling: [8, 11, 4, 5, 5, 1.7, 1, 0.24, 0.2, 1, 1.9, 1.7, 2.6]
+  state_scaling: [5.6, 3.5, 4.2, 3.0, 2.5, 1.7, 1, 0.2, 0.2, 1, 1.5, 1.5, 2.6]
 
+  # Comment this for ODE
   diffusion_density_nn:
     # All inputs are contributing to the noise
     # Inputs that contribute to the noise estimation
@@ -67,9 +65,8 @@ model:
     
     density_nn:
       init_value: 0.001
-      activation_fn: tanh
-      hidden_layers: [16, 16]
-      aggressiveness: 0.75
+      activation_fn: swish
+      hidden_layers: [32, 32]
 
   # Ground effect learning enabled?
   ground_effect: False # True -> tb
@@ -115,10 +112,13 @@ sde_loss:
   # What stepsize to use when fitting the model to the data
   data_stepsize: 0.01
   stepsize: 0.05
+  u_sampling_strategy: first
 
   # Number of particles when fitting the SDE -> If different to the default model num_particles
   num_particles: 1
   num_particles_test: 5
+  # # Uncomment this for neural ODE
+  # num_particles_test: 1
 
   # This is the horizon of integration when computing the loss
   # It might get clipped to the horizon of each trajectory in the dataset if it's greater than trajectory length
@@ -127,15 +127,18 @@ sde_loss:
 
   # Randomly subsample the horizon to fit only num_sample2consider if given
   num_sample2consider: 5
-  # How the states are scaled in the loss computation
-  obs_weights: [8, 11, 4, 5, 5, 1.7, 1, 0.24, 0.2, 1, 6, 6, 5]
-  u_sampling_strategy: random
 
-  # Density loss parameters
+  # How the states are scaled in the loss computation
+  obs_weights: [5.6, 3.5, 4.2, 3.0, 2.5, 1.7, 1, 1, 1, 1, 1.5, 1.5, 2.6]
+
   density_loss:
-    learn_mucoeff: False # Should we learn the local strong convexity parameters?
+    learn_mucoeff:
+      type: dnn
+      init_value: 0.01
+      activation_fn: tanh
+      hidden_layers: [8, 8]
     mu_coeff: 10.0 # STrong convexity parameter
-    ball_radius: 0.05 # THe radius of the ball to sample for enforcing local strong convexity
+    ball_radius: 0.1 # THe radius of the ball to sample for enforcing local strong convexity
     ball_nsamples: 10 # Number of points to sample in the ball
   
   # Penalty for the error on the prediction
@@ -148,34 +151,23 @@ sde_loss:
   pen_density_scvex: 1.0
 
   # Regularization penalty default value for all parameters
-  pen_weights: 1.0e-4 #1.0e-6
+  pen_weights: 1.0e-3
+
+  # Penalty on mu learnt
+  pen_mu_type: lin_inv
+  pen_mu_coeff: 100.0
+  # Scaling down the dad term importance relative to data
+  pen_scvex_mult: 0.01
 
   #########################################################################
   # Extra constraints parameterization
   #########################################################################
 
   default_weights: 1.0
-  
+
   special_parameters_pen: # Deviation from initial guess in init_params
     scaler: 0
     density: 0
-    # aero_kdx: 1.0e-5
-    # aero_kdy: 1.0e-5
-    # aero_kdz: 1.0e-5
-    # aero_kh: 1.0e-5
-    # mass: 10000000
-    # Ixx: 2.0
-    # Iyy: 2.0
-    # Izz: 2.0
-
-# Convergence values for certain parameters
-# special_parameters_val:
-#   mass: 1.5
-#   Ixx: 0.025
-
-# Default NN weights values when penalization
-# default_parameters_val: 0.
-
 
 sde_optimizer:
   - name: scale_by_adam
@@ -190,22 +182,27 @@ sde_optimizer:
     params:
       init_value: -0.01 # Initial learning rate (Negative value for minimization)
       end_value: -0.001
-      transition_steps: 30000 # Basically the maximum number of gradient steps 
-  # - name: adaptive_grad_clip
+      transition_steps: 10000 # Basically the maximum number of gradient steps 
+  # - name: piecewise_constant_schedule
+  #   scheduler: True
   #   params:
-  #     clipping: 0.01
-
+  #     init_value: -0.001 # Initial learning rate (Negative value for minimization)
+  #     boundaries_and_scales:
+  #       4000: 10.0
+  #       18000: 0.5
+  #       30000: 0.2
+  
 
 # Training parameters
 sde_training:
-  train_batch: 128 # The mini batch size for the training dataset
+  train_batch: 512 # The mini batch size for the training dataset
   test_batch: 512 # The mini batch size for the training dataset
-  nepochs: 5000 # The number of epochs (full pass over the training dataset)
-  patience: 2000 # The number of epochs after which to stop the learningif no improvement in solution
+  nepochs: 1000 # The number of epochs (full pass over the training dataset)
+  patience: 50 # The number of epochs after which to stop the learningif no improvement in solution
   test_freq: 50 # Number of gradient steps after which to evaluate and display losses
   save_freq: 500 # Number of gradient steps after which to save the current losses+nn
   # Additional parameters to display when showing loss evolution
-  show_param: ['aero_kdx', 'aero_kdy', 'aero_kdz', 'aero_kh',  'mass', 'Ixx', 'Iyy', 'Izz']
+  show_param: ['aero_kdx', 'aero_kdy', 'aero_kdz', 'aero_kh',  'mass', 'Ixx', 'Iyy', 'Izz', 'Lmx', 'Lmy', 'CoeffDrag']
   TestStopingCrit:
     TestErrorData: 1.0 # 0.1
     # TestStdData: -0.1 # Maximime the noise of the learned SDE

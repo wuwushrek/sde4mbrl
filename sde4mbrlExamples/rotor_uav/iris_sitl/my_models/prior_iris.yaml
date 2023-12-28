@@ -1,0 +1,23 @@
+learned:
+  CoeffDrag: 0.7584581971168518
+  Ixx: 0.02753153257071972
+  Iyy: 0.25247135758399963
+  Izz: 0.29808419942855835
+  Lmx: 0.42842361330986023
+  Lmy: 2.8206980228424072
+  coeffMot0: 3.6436004638671875
+  coeffMot1: 1.1513954401016235
+  fm_model: &id001
+    assume_sym: false
+    learn_mixer: false
+    order: 1
+    use_constant_term: true
+  gravity: 9.81
+  mass: 1.5007237195968628
+prior:
+  Ixx: 0.025
+  Iyy: 0.025
+  Izz: 0.05
+  fm_model: *id001
+  gravity: 9.81
+  mass: 1.5

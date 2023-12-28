@@ -1,3 +1,7 @@
+"""
+Scripting functions for smoothing data and analysis noise frequency of the data
+"""
+
 import copy
 import numpy as np
 

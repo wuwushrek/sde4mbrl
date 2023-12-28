@@ -1,3 +1,8 @@
+"""
+    -   Perform basic system identification of the parameters of the rotor UAV model
+    -   Use basic finite difference to compute the derivatives of the states
+    -   Then, stochastic gradient descent is used to optimize the parameters of the model
+"""
 import numpy as np
 
 import jax
@@ -6,12 +11,11 @@ import jax.numpy as jnp
 import haiku as hk
 import optax
 
-# from jaxopt import PolyakSGD
-# from jaxopt import ArmijoSGD
-
 from sde4mbrlExamples.rotor_uav.sde_rotor_model import SDERotorModel
 from sde4mbrlExamples.rotor_uav.utils import  parse_ulog
-from sde4mbrl.utils import apply_fn_to_allleaf, load_yaml
+from sde4mbrl.utils import load_yaml
+
+from sde4mbrl.utils import apply_fn_to_allleaf
 
 # This requires extra library to be installed
 from sde4mbrlExamples.rotor_uav.smoothing_data import filter_data
@@ -71,16 +75,12 @@ def get_penalty_parameters(dict_params, dict_penalty, default_value):
 
     Args:
         dict_params (TYPE): The dictionary of the parameters
-        dict_penlaty (TYPE): A flat dictionary of the penalty parameters
+        dict_penalty (TYPE): A flat dictionary of the penalty parameters
 
     Returns:
         TYPE: Description
     """
-    # penalty_params = {}
-    # If some of the key matches --> directly set them
-
     key_changed, _dict_params = set_values_matching_keys(dict_params, dict_penalty)
-
     for k, v in _dict_params.items():
         if k in key_changed:
             continue
@@ -123,6 +123,19 @@ def get_all_leaf_dict(d):
     return res_dict
 
 
+def convert_dict_jnp_to_dict_list(d):
+    """Convert a dictionary with jnp arrays to a dictionary with lists"""
+    res_dict = {}
+    for k, v in d.items():
+        # if the value is a dictionary, convert it recursively
+        if isinstance(v, dict):
+            res_dict[k] = convert_dict_jnp_to_dict_list(v)
+        else:
+            list_value = v.tolist()
+            res_dict[k] = list_value 
+    return res_dict
+
+
 def evaluate_loss_fn(loss_fn, m_params, data_eval, test_batch_size):
     """Compute the metrics for evaluation accross the data set
 
@@ -130,10 +143,10 @@ def evaluate_loss_fn(loss_fn, m_params, data_eval, test_batch_size):
         loss_fn (TYPE): A loss function lambda m_params, data : scalar
         m_params (dict): The parameters of the neural network model
         data_eval (iterator): The dataset considered for the loss computation
-        num_iter (int): The number of iteration over the data set
+        test_batch_size (int): The batch size for the evaluation
 
     Returns:
-        TYPE: Returns loss metrics
+        TYPE: Returns loss metrics as a dictionary
     """
     result_dict ={}
 
@@ -163,12 +176,17 @@ def evaluate_loss_fn(loss_fn, m_params, data_eval, test_batch_size):
 
 def init_data(log_dir, cutoff_freqs, force_filtering=False, zmin=0.1, mavg_dict={}):
     """Load the data from the ulog file and return the data as a dictionary.
+    The data is also filtered and the filtered data is saved in the log directory
 
     Args:
-        dataset_dir (str): The path to the ulog file
+        log_dir (str): The path to the ulog file
+        cutoff_freqs (dict): The cutoff frequencies for the filters
+        force_filtering (bool, optional): If True, the data is filtered even if a filtered version already exists
+        zmin (float, optional): The minimum altitude for the data to be considered
+        mavg_dict (dict, optional): The dictionary of the moving average parameters
 
     Returns:
-        dict: The data dictionary
+        dict: The dictionary of the data: xdot, x, u
     """
     log_dir = os.path.expanduser(log_dir)
     # Extract the current directory without the filename
@@ -256,6 +274,20 @@ def init_data(log_dir, cutoff_freqs, force_filtering=False, zmin=0.1, mavg_dict=
 def create_loss_function(prior_model_params, loss_weights, seed=0):
     """ Create the learning loss function and the parameters of the 
         approximation
+        -   Extract the parametrized vector field from the SDE model
+        -   Define the loss function as the mean squared error between the finite difference of the states
+            and the vector field estimated
+        -   The paramaters of the loss are the mass, intertia, mixer matrix, and motor to thrust function
+
+        Args:
+            prior_model_params (dict): The parameters of the prior model
+            loss_weights (dict): The weights of the loss function
+            seed (int, optional): The seed for the initialization of the parameters. Defaults to 0.
+
+        Returns:
+            dict : The parameters of the loss function
+            function: The loss function lambda params, batch_xdot, batch_x, batch_u : total_loss, dict_extra_loss
+            function: A function to estimate the vector field. lambda params, x, u : xdot
     """
     # Predictor for the vector field
     vector_field_pred = lambda x, u : SDERotorModel(prior_model_params).vector_field(x, u)
@@ -271,6 +303,7 @@ def create_loss_function(prior_model_params, loss_weights, seed=0):
     init_params = prior_model_params.get('init_params', {})
 
     # Now we create the constraint to add to these parameters
+    # If given in the config file, we penalize the parameters of the model differently
     nominal_params = get_penalty_parameters(vector_field_pred_params, {}, 0.) # Set the default desired values to be zero
     nominal_params = get_penalty_parameters(nominal_params, init_params, None) # The desired values are the initial values
 
@@ -278,7 +311,10 @@ def create_loss_function(prior_model_params, loss_weights, seed=0):
     print('Nominal parameters values: \n {}'.format(nominal_params))
 
     # Let's get the penalty coefficients for regularization
+    # These are penalty coefficients for the parameters to be as close as possible to the initial parameters
     special_parameters = loss_weights.get('special_parameters_pen', {}) # Penalty coefficients for special parameters
+    # By default regularization will be applied to make the parameters as close as possible to the initial parameters
+    # If not, then we can set the default weights to zero
     default_weights = loss_weights.get('default_weights', 0.) # Penalty parameters for all other parameters
     penalty_coeffs = get_penalty_parameters(vector_field_pred_params, special_parameters, default_weights)
 
@@ -287,7 +323,13 @@ def create_loss_function(prior_model_params, loss_weights, seed=0):
 
     # Create the loss function
     def _loss_fun(est_params, batch_xdot, batch_x, batch_u):
-        """The loss function"""
+        """The system identification loss function
+            Args:
+                est_params: the estimated parameters of the model
+                batch_xdot: a batch of estimated xdot (the finite difference of the states)
+                batch_x: a batch of states
+                batch_u: a batch of control actions
+        """
 
         # Compute the vector field prediction
         xdot_pred = jax.vmap(lambda x, u : vector_field_pred_fn.apply(est_params, x, u), in_axes=(0,0))(batch_x, batch_u)
@@ -315,24 +357,13 @@ def create_loss_function(prior_model_params, loss_weights, seed=0):
     
     return vector_field_pred_params, _loss_fun, vector_field_pred_fn
 
-def convert_dict_jnp_to_dict_list(d):
-    """Convert a dictionary with jnp arrays to a dictionary with lists"""
-    res_dict = {}
-    for k, v in d.items():
-        # if the value is a dictionary, convert it recursively
-        if isinstance(v, dict):
-            res_dict[k] = convert_dict_jnp_to_dict_list(v)
-        else:
-            list_value = v.tolist()
-            res_dict[k] = list_value 
-    return res_dict
 
-
-def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
+def train_static_model(yaml_cfg_file, output_file=None):
     """Train the static model
 
     Args:
         yaml_cfg_file (str): The path to the yaml configuration file
+        output_file (str, optional): The path to the output file. Defaults to None.
     """
     # Open the yaml file containing the configuration to train the model
     cfg_train = load_yaml(yaml_cfg_file)
@@ -372,27 +403,28 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
     
     # Load the test trajectory data
     test_traj_dir = cfg_train['test_trajectory']
-    test_traj_data = init_data(test_traj_dir, cutoff_freqs, force_filtering=cfg_train['force_filtering'], zmin=cfg_train.get('zmin', 0.1), mavg_dict=cfg_train.get('mavg_dict', {}))
+    test_traj_data = init_data(test_traj_dir, cutoff_freqs, 
+                                force_filtering=cfg_train['force_filtering'], 
+                                zmin=cfg_train.get('zmin', 0.1), 
+                                mavg_dict=cfg_train.get('mavg_dict', {})
+                                )
+    
+    # Check that the number of states and inputs is correct
     assert test_traj_data is not None, 'The test trajectory data could not be loaded'
-    # CHeck that the number of states and inputs is correct
     assert test_traj_data['x'].shape[1] == nx, 'The number of states in test trajectory is not correct'
     assert test_traj_data['u'].shape[1] == nu, 'The number of inputs in test trajectory is not correct'
     
-    # Random number generator for numpy variables
+    # Seed random number generator for numpy variables
     seed = cfg_train['seed']
     # Numpy random number generator
     m_numpy_rng = np.random.default_rng(seed)
-    # Generate the JAX random key generator
-    # train_rng = jax.random.PRNGKey(seed)
 
     # Get the path the directory of this file
     m_file_path = os.path.expanduser(cfg_train['vehicle_dir'])
 
-    # Load the prior model parameters
+    # Load the prior model parameters if present
+    # These are initial values of the parameters of the model
     init_params = cfg_train['init_params']
-    # if fm_model is not None:
-    #     init_params['fm_model'] = fm_model
-    # fm_model = init_params['fm_model']
 
     # Prettu print the prior model parameters
     print('\nPrior model parameters')
@@ -425,7 +457,7 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
         else:
             print('\t - {} : {}'.format(k, v))
     
-    # Define the multi_trajectory loss
+    # Define the jitted actual loss given a dictionary of features
     @jax.jit
     def actual_loss(est_params, data):
         """The actual loss function"""
@@ -437,7 +469,7 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
         loss, loss_dict = loss_fun(est_params, batch_xdot, batch_x, batch_u)
         return loss, loss_dict
     
-    # Define the evaluation function
+    # This function is called on the testing dataset and is used to show the model performance
     eval_test_fn = lambda est_params: evaluate_loss_fn(actual_loss, est_params, test_traj_data, cfg_train['training']['test_batch_size'])
 
     # Create the optimizer
@@ -475,6 +507,7 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
     init_nn_params = pb_params
 
     # Get the non-negative parameters if any
+    # These are the parameters that will be projected onto non-negative values
     nonneg_params = get_non_negative_params(pb_params, { k : True for k in cfg_train.get('non_neg_params', [])} )
     print('Nonnegative parameters: \n {}'.format(nonneg_params))
 
@@ -486,7 +519,7 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
         _paramns = jax.tree_map(lambda x, nonp : jnp.maximum(x, 1e-6) if nonp else x, paramns, nonneg_params)
         return _paramns, actual_loss(_paramns, data)[1]
 
-    # Define the update function that will be used with no special solver
+    # Define the update function that will be used
     @jax.jit
     def update(paramns, opt_state, data):
         """Update the parameters of the neural network"""
@@ -543,11 +576,6 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
             save_dict = {'learned' : converted_params, 'prior' : init_params}
             yaml.dump(save_dict, params_outfile)
 
-    # # Open the info file to save the parameters information
-    # outfile = open(output_dir+out_data_file+'_info.txt', 'w')
-    # outfile.write('Training parameters: \n{}'.format(m_parameters_dict))
-    # outfile.write('\n////// Command line messages \n\n')
-    # outfile.close()
 
     # Save the initial parameters in a yaml file
     save_learned_params(opt_params_dict)
@@ -567,28 +595,20 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
 
         # Iterate through the number of total batches
         for i in tqdm(range(num_evals_per_epoch), leave=False):
+            # Store the log data
             log_data = dict()
-
-            # # Generate a bunch of random batch indexes for each trajectory in fulldata
-            # batch_idx = [ m_numpy_rng.choice(_data['x'].shape[0], batch_size, replace=False) \
-            #                 for _data in full_data ]
-
-            # # Extract the data from the batch indexes
-            # batch_data = [ {k : v[batch_idx_ind,:] for k, v in _data.items()} \
-            #                 for batch_idx_ind, _data in zip(batch_idx, full_data) ]
-
-            # # Concatenate the data
-            # batch_data = {k : np.concatenate([_data[k] for _data in batch_data], axis=0) \
-            #                 for k in batch_data[0].keys()}
 
             # Generate the batch data
             batch_idx = m_numpy_rng.choice(full_data['x'].shape[0], batch_size, replace=False)
             batch_data = {k : full_data[k][batch_idx] for k in full_data.keys()}
 
-            
+            # First iteration, we evaluate the loss on the test set            
             if itr_count == 0:
                 _train_dict_init = eval_test_fn(init_nn_params)
+                print(_train_dict_init)
                 _test_dict_init = copy.deepcopy(_train_dict_init)
+                log_data_list.append(apply_fn_to_allleaf(np.array, jnp.ndarray, 
+                                        {"Train" : _train_dict_init, "Test" : _test_dict_init}))
             
             # Increment the iteration count
             itr_count += 1
@@ -598,6 +618,7 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
 
             # Update the parameters
             if special_solver:
+                # In case jaxopt is used, the syntax to update the parameters is different
                 # Update the parameters with the special solver
                 pb_params, opt_state = opt.update(pb_params, opt_state, batch_data)
                 tree_flatten(opt_state)[0][0].block_until_ready()
@@ -606,6 +627,7 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
                 pb_params, _train_res = projection(pb_params, batch_data)
             else:
                 # Update the parameters with the standard solver
+                # This is the standard optax update
                 pb_params, opt_state, _train_res = update(pb_params, opt_state, batch_data)
                 tree_flatten(opt_state)[0][0].block_until_ready()
                 
@@ -624,6 +646,7 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
 
             # Check if it is time to compute the metrics for evaluation
             if itr_count % training_params['test_freq'] == 0 or itr_count == 1:
+
                 # Print the logging information
                 print_str_test = '----------------------------- Eval on Test Data [Iteration count = {} | Epoch = {}] -----------------------------\n'.format(itr_count, epoch)
                 tqdm.write(print_str_test)
@@ -631,15 +654,17 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
                 # Compute the metrics on the test dataset
                 _test_res = eval_test_fn(pb_params)
 
-                # First time we have a value for the loss function
+                # Compute the total loss used for early stopping
                 curr_improv_loss = _test_res['total_loss'] + _train_res['total_loss'] * training_params.get('TrainCoeff', 0.0)
-                # improv_cond = opt_variables['total_loss'] >= 
+                
+                # Check if the loss has improved
                 if itr_count == 1 or (opt_variables['total_loss'] >= curr_improv_loss):
                     opt_params_dict = pb_params
                     opt_variables = _test_res
                     opt_variables['total_loss'] = curr_improv_loss
                     count_epochs_no_improv = 0
 
+                # Create a dictionary of string containing the results of the current evaluation
                 fill_dict(log_data, _train_res, 'Train', '{:.3e}')
                 fill_dict(log_data, _test_res, 'Test', '{:.3e}')
                 log_data_copy = copy.deepcopy(log_data)
@@ -647,12 +672,12 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
                 fill_dict(log_data_copy, _train_dict_init, 'Init Train', '{:.3e}')
                 fill_dict(log_data_copy, _test_dict_init, 'Init Test', '{:.3e}')
                 parameter_evolution.append(opt_params_dict)
-
+                
+                # Printing the data
                 print_str = 'Iter {:05d} | Total Update Time {:.2e} | Update time {:.2e}\n'.format(itr_count, total_time, update_end)
                 print_str += pretty_dict(log_data_copy)
                 print_str += '\n Number epochs without improvement  = {}'.format(count_epochs_no_improv)
                 print_str += '\n'
-                # tqdm.write(print_str)
 
                 # Pretty print the parameters of the model
                 print_str += '----------------------------- Model Parameters -----------------------------\n'
@@ -668,17 +693,12 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
                 tqdm.write(print_str)
 
                 # Save all the obtained data
-                log_data_list.append(log_data)
-
-                # # Save these info of the console in a text file
-                # outfile = open(output_dir+out_data_file+'_info.txt', 'a')
-                # outfile.write(print_str_test)
-                # outfile.write(print_str)
-                # outfile.close()
+                log_data_list.append(apply_fn_to_allleaf(np.array, jnp.ndarray, {"Train" : _train_res, "Test" : _test_res}))
 
             last_iteration = (epoch == training_params['nepochs']-1 and i == num_evals_per_epoch-1)
             last_iteration |= (count_epochs_no_improv > training_params['patience'])
 
+            # Is it time to save the data?
             if itr_count % training_params['save_freq'] == 0 or last_iteration:
                 m_dict_res = {'last_params' : pb_params,
                                 'best_params' : opt_params_dict,
@@ -689,6 +709,7 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
                                 'init_losses' : (_train_dict_init, _test_dict_init),
                                 'training_parameters' : m_parameters_dict,
                                 'parameter_evolution' : parameter_evolution}
+                m_dict_res = apply_fn_to_allleaf(np.array, jnp.ndarray, m_dict_res)
                 outfile = open(output_dir+out_data_file+'.pkl', "wb")
                 pickle.dump(m_dict_res, outfile)
                 outfile.close()
@@ -697,6 +718,7 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
 
             if last_iteration:
                 break
+
         if last_iteration:
             break
 
@@ -704,13 +726,11 @@ def train_static_model(yaml_cfg_file, output_file=None, fm_model=None):
 if __name__ == '__main__':
 
     # Parse the arguments
-    # train_static_model.py --cfg cfg_sitl_iris.yaml --output_file test --fm_model cubic
+    # python train_static_model.py --cfg iris_sitl/optimizer_prior.yaml --out prior_iris
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str, required=True, help='Path to the yaml configuration file')
     parser.add_argument('--out', type=str, default=None, help='Path to the output file')
-    # Parse the motor model
-    parser.add_argument('--fm_model', type=str, default='', help='Force and Moment model to use: linear, quadratic, cubic, sigmoid_linear, sigmoid_quad')
     args = parser.parse_args()
 
     # Train the static model
-    train_static_model(args.cfg, output_file=args.out, fm_model=args.fm_model if len(args.fm_model) > 0 else None)
+    train_static_model(args.cfg, output_file=args.out)

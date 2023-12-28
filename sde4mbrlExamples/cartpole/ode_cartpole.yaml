@@ -136,8 +136,8 @@ sde_optimizer:
 sde_training:
   train_batch: 512 # The mini batch size for the training dataset
   test_batch: 512 # The mini batch size for the training dataset
-  nepochs: 5000 # The number of epochs (full pass over the training dataset)
-  patience: 2000 # The number of epochs after which to stop the learningif no improvement in solution
+  nepochs: 1000 # The number of epochs (full pass over the training dataset)
+  patience: 200 # The number of epochs after which to stop the learningif no improvement in solution
   test_freq: 50 # Number of gradient steps after which to evaluate and display losses
   save_freq: 500 # Number of gradient steps after which to save the current losses+nn
   TestStopingCrit:

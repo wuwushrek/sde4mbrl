@@ -1,6 +1,3 @@
-# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python sde_rotor_model.py --fun train_sde --cfg hexa_ahg/optimizer_sde.yaml --out hexa_ahg_linear_nonoise
-# XLA_PYTHON_CLIENT_MEM_FRACTION=0.5 python sde_rotor_model.py --fun gen_traj --cfg hexa_ahg/data_generation.yaml
-
 # The directory containing my_models and my_data
 vehicle_dir: ~/Documents/sde4mbrl/sde4mbrlExamples/rotor_uav/hexa_ahg
 

@@ -17,8 +17,11 @@ from sde4mbrlExamples.rotor_uav.sde_mpc_design import load_mpc_from_cfgfile
 
 from sde4mbrlExamples.rotor_uav.utils import quat_from_euler, quat_to_euler
 
+# Name of the configuration file with the MPC parameters
 cfg_file = 'mpc_test_cfg.yaml'
 cfg_dict, (m_reset, m_mpc), state_from_traj, _one_step_function = load_mpc_from_cfgfile(cfg_file, convert_to_enu=False)
+default_uref = np.array(cfg_dict['cost_params']['uref'])
+rate_control = cfg_dict['model'].get('control_augmented_state', False)
 
 m_reset_jit = jax.jit(m_reset)
 # opt_state = m_reset_jit()
@@ -40,7 +43,7 @@ m_mpc_jit = jax.jit(m_mpc)
 stepsize = 0.01 # Integration step size
 
 def extract_policy(opt_state):
-    return {'avg_linesearch': opt_state.avg_linesearch, 'delta' : opt_state.x_opt[0,0], 'eng' : opt_state.x_opt[0,1],
+    return {'avg_linesearch': opt_state.avg_linesearch, 'M1' : opt_state.x_opt[0,0], 'M2' : opt_state.x_opt[0,1],
             'num_steps' : opt_state.num_steps, 'grad_norm': opt_state.grad_sqr,
             'avg_stepsize': opt_state.avg_stepsize, 'cost0': opt_state.init_cost, 'costT': opt_state.opt_cost }
 
@@ -99,6 +102,8 @@ def play_policy(num_iteration, rng):
 
     # Initialize the state in the environment
     state0, _target = init_env(init_rng)
+    if rate_control:
+        state0 = jnp.concatenate([state0, default_uref])
 
     # Extract the initial state of the solver
     opt_state = m_reset_jit(x=state0, rng=_reset_rng)
@@ -124,7 +129,7 @@ def play_policy(num_iteration, rng):
         elapsed_time = time.time() - curr_time
 
         # costv = jax.jit(cost_fn)(state0, _uopt) * 0.01
-        cost_total += float(vehicle_states[0, 1, -1])
+        cost_total += float(vehicle_states[0, 0, -1])
 
         # Extract the interesting features from the optimizer state
         feats = extract_policy(opt_state)
@@ -167,18 +172,23 @@ print(len(state_evol))
 
 fig, axs = plt.subplots(4, 4, figsize=(20, 20), sharex=True)
 axs = axs.flatten()
-for i in range(len(state_evol)-1):
+for i in range(13):
     axs[i].plot(state_evol[i])
     if i < 13:
         if 'state_traj' in cfg_dict:
-            axs[i].plot(cfg_dict['state_traj'][:,i], 'r--')
+            axs[i].plot(cfg_dict['state_traj'][:,i], 'r--', linewidth=2)
         else:
             assert targetSp is not None, 'Target state is not defined'
-            axs[i].plot(np.ones_like(state_evol[i]) * targetSp[i], 'r--')
-    if i == 15:
-        axs[i].plot(state_evol[i+1], '--')
+            axs[i].plot(np.ones_like(state_evol[i]) * targetSp[i], 'r--', linewidth=2)
     axs[i].set_ylabel(state_label[i])
     axs[i].set_xlabel('t')
     axs[i].grid()
 
+# The last 6 are the control inputs m1, m2, m3, m4, m5, m6
+for i in range(2):
+    axs[13+i].plot(state_evol[13+2*i])
+    axs[13+i].plot(state_evol[13+2*i+1], '--')
+    axs[13+i].set_ylabel('m{}'.format(i+1))
+    axs[13+i].set_xlabel('t')
+    axs[13+i].grid()
 plt.show()

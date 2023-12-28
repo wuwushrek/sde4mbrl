@@ -1,23 +1,31 @@
+""" 
+The neural network-based SDE model used for control of multirotor UAVs.
+"""
 import jax
 import jax.numpy as jnp
 
 import numpy as np
 
+# Some utilities functions
 from sde4mbrlExamples.rotor_uav.utils import quatmult as quatmult_gen
 from sde4mbrlExamples.rotor_uav.utils import quat_rotatevector as quat_rotatevector_gen
 from sde4mbrlExamples.rotor_uav.utils import quat_rotatevectorinv as quat_rotatevectorinv_gen
 
+# Import the motor models
 from sde4mbrlExamples.rotor_uav.motor_models import *
 
+# Import the SDE modeling functions
 from sde4mbrl.nsde import ControlledSDE, create_sampling_fn, create_online_cost_sampling_fn, compute_timesteps
 from sde4mbrl.utils import load_yaml, update_params, apply_fn_to_allleaf
 
+# Neural network utilities
 import haiku as hk
 
 import os
 import pickle
 
-# Make sure jax is used for all these function calls
+# Make sure jax.numpy is used for all these function calls
+# This is to make sure that the functions are jitted and compiled
 quatmult = lambda a, b: quatmult_gen(a, b, jnp)
 quat_rotatevector = lambda q, v: quat_rotatevector_gen(q, v, jnp)
 quat_rotatevectorinv = lambda q, v: quat_rotatevectorinv_gen(q, v, jnp)
@@ -111,27 +119,29 @@ def set_ang_vel(state, w):
     return state.at[10:13].set(w)
 
 class SDERotorModel(ControlledSDE):
-    """SDE model of the UAV rotors
+    """SDE model of the multirotor UAV.
     """
     def __init__(self, params, name=None):
         # Define the params here if needed before initialization
         super().__init__(params, name=name)
 
-        # Parameters initialization values -> Values for HK PARAMETERS initialization
+        # Prior parameters initialization values (if given)
+        # These are typically non neural network parameters such as the mass, inertia, etc.
         self.init_params = params['init_params']
         assert 'fm_model' in self.init_params, "The motor models must be specified"
-        # Tese could be polynomial models as specified in motor_models.py
 
         # Initialization of the residual networks
+        # These are the neural networks for thrust, moments and residuals
         self.init_residual_networks()
 
+        # Scaling values for the state to normalize the neural network inputs
         self.state_scaling = jnp.array(self.params.get('state_scaling', [1.0] * self.n_x))
         max_scaling = jnp.max(self.state_scaling)
 
-        # In case scaling factor is give, we also need to ensure scaling diffusion network inputs
+        # In case state_scaling is specified, 
+        # reduced_state scales the state used as input to our diffusion term eta_\theta
         if 'state_scaling' in self.params:
-            # self.reduced_state = lambda x : x / self.state_scaling
-            self.reduced_state = lambda x : x / max_scaling
+            self.reduced_state = lambda x : x[:13] / max_scaling # [:13] is to ensure in the augmented state, the diff only use necessary states
 
     def get_param(self, param_name):
         """Get the value of the parameter with the given name.
@@ -147,9 +157,9 @@ class SDERotorModel(ControlledSDE):
             return init_value
         return hk.get_parameter(param_name, shape=(), init=hk.initializers.Constant(init_value))
 
-    # Define a projection function specifically for the quaternions
     def projection_fn(self, x):
         """Projection function for the quaternion of the state
+            This function is used at each integration step to project the quaternion to the unit sphere.
             Args:
                 x (jax.numpy.ndarray): The state of the drone.
             Returns:
@@ -172,8 +182,9 @@ class SDERotorModel(ControlledSDE):
                 jax.numpy.ndarray: The derivative of the velocity.
 
         """
-        # Get the mass -> This is a parameter that can be learned
+        # Get the mass -> This is a parameter should be learned
         m = self.get_param('mass')
+
         # Get the gravity
         g = self.init_params.get('gravity', 9.81)
 
@@ -181,6 +192,9 @@ class SDERotorModel(ControlledSDE):
         F = jnp.array([0., 0., Fz])
         if Fres is not None:
             F += Fres
+        
+        # [TODO, Franck]
+        # Maybe we should add learned coriolis effects
 
         # Rotate the thrust into the inertial frame
         q = get_quat(x)
@@ -213,6 +227,9 @@ class SDERotorModel(ControlledSDE):
         M = Mxyz
         if Mres is not None:
             M += Mres
+        
+        # [TODO, Franck]
+        # Maybe we should add learned coriolis effects
 
         # Get the angular velocity
         ang_vel = get_ang_vel(x)
@@ -229,6 +246,7 @@ class SDERotorModel(ControlledSDE):
         # Get the quaternion derivative
         quat_dot = 0.5 * quatmult(get_quat(x), jnp.array([0., ang_vel[0], ang_vel[1], ang_vel[2]]))
 
+        # Return the derivative of the quaternion and the angular velocity
         return quat_dot, ang_acc
 
     def fm_model(self, u):
@@ -263,7 +281,7 @@ class SDERotorModel(ControlledSDE):
             Args:
                 x (jax.numpy.ndarray): The state of the drone.
         """
-        # TODO: Implement the ground effect
+        # [TODO, Franck] Implement the ground effect
         # Project the position in the local frame
         # Then the results is dependent on the projected height
         # This is a hack for the thrust response to see if the static learning worked well
@@ -283,23 +301,24 @@ class SDERotorModel(ControlledSDE):
         if not ('residual_forces' in self.params or 'aero_drag_effect' in self.params):
             return None
 
-        # Create an MLP to compute the residual
-        # The parameters are store in params dictionary under residual_forces
+        # Residual initialization to zero if not specified
         Fres = jnp.zeros(3)
 
-        # The residual terms are function of the velocity and angular velocity in the body frame
+        # The residual force term is a neural network function 
+        # of the velocity and angular velocity in the body frame
         if 'residual_forces' in self.params:
+            # Form the input vector for the neural network
             in_vect = jnp.array([v_b[0], v_b[1], v_b[2], x[10], x[11], x[12]])
+            # Scale the input vector if needed
             in_vect_scale = jnp.array([self.state_scaling[3], self.state_scaling[4], self.state_scaling[5],
                                        self.state_scaling[10], self.state_scaling[11], self.state_scaling[12]])
             in_vect = in_vect / in_vect_scale
+            # User-specified active indices for computing the residual forces
             active_indx = self.params['residual_forces'].get('active_indx', None)
             in_vect = in_vect[jnp.array(active_indx)] if active_indx is not None else in_vect
-            stab_coeff = 1.0
-            if self.params.get('stability', False):
-                stab_coeff = jnp.sum(jnp.square(in_vect))
-            Fres += self.residual_forces(in_vect) * stab_coeff
+            Fres += self.residual_forces(in_vect) 
 
+        # If the aero_drag_effect is enabled, add the learned drag force
         if self.params.get('aero_drag_effect', False):
             Fres += self.aero_drag(v_b)
 
@@ -313,20 +332,22 @@ class SDERotorModel(ControlledSDE):
             Returns:
                 jax.numpy.ndarray: The residual moment.
         """
+        # Check if the moment_residual is enabled
         if not 'residual_moments' in self.params:
             return None
-        # Create an MLP to compute the residual
-        # The parameters are store in params dictionary under residual_forces
+        
+        # The residual moment term is a neural network function 
+        # of the velocity and angular velocity in the body frame
+        # Form the input vector for the neural network
         in_vect = jnp.array([v_b[0], v_b[1], v_b[2], x[10], x[11], x[12]])
+        # Scale the input vector if needed
         in_vect_scale = jnp.array([self.state_scaling[3], self.state_scaling[4], self.state_scaling[5],
                                        self.state_scaling[10], self.state_scaling[11], self.state_scaling[12]])
         in_vect = in_vect / in_vect_scale
+        # User-specified active indices for computing the residual forces
         active_indx = self.params['residual_moments'].get('active_indx', None)
         in_vect = in_vect[jnp.array(active_indx)] if active_indx is not None else in_vect
-        stab_coeff = 1.0
-        if self.params.get('stability', False):
-            stab_coeff = jnp.sum(jnp.square(in_vect))
-        Mres = self.residual_moments(in_vect) * stab_coeff
+        Mres = self.residual_moments(in_vect)
         return Mres
 
     def get_effective_thrust(self, thrust_, ge_effect):
@@ -349,8 +370,9 @@ class SDERotorModel(ControlledSDE):
         Args:
             x (jax.numpy.ndarray): The state of the quadrotor.
             u (jax.numpy.ndarray): The input of the quadrotor.
-            Fres (jax.numpy.ndarray, optional): The residual force. Defaults to None -> means zero
-            Mres (jax.numpy.ndarray, optional): The residual moment. Defaults to None -> means zero
+            Fres (jax.numpy.ndarray): The residual force. Defaults to None -> means zero
+            Mres (jax.numpy.ndarray): The residual moment. Defaults to None -> means zero
+            ge_effect (jax.numpy.ndarray): The ground effect multiplicative value that is learned. Defaults to None -> means no ground effect
 
         Returns:
             jax.numpy.ndarray: The derivative of the state.
@@ -369,13 +391,12 @@ class SDERotorModel(ControlledSDE):
         return jnp.concatenate((pos_dot, v_dot, quat_dot, omega_dot))
 
     def init_residual_networks(self):
-        """Initialize the residual deep neural networks
+        """Initialize the residual forces and moments as deep neural networks
         """
-        # Create the residual MLP
-        # The parameters are store in params dictionary under residual_forces
-        # The residual MLP is a function of the state and the control
+        # The residual force
         if 'residual_forces' in self.params:
             _act_fn = self.params['residual_forces']['activation_fn']
+            # The parameters are initialized using as values close to zero
             self.residual_forces = hk.nets.MLP([*self.params['residual_forces']['hidden_layers'], 3],
                                                 activation = getattr(jnp, _act_fn) if hasattr(jnp, _act_fn) else getattr(jax.nn, _act_fn),
                                                 w_init=hk.initializers.RandomUniform(-0.001, 0.001),
@@ -384,6 +405,7 @@ class SDERotorModel(ControlledSDE):
         # The residual MLP is a function of the state and the control
         if 'residual_moments' in self.params:
             _act_fn = self.params['residual_moments']['activation_fn']
+            # The parameters are initialized using as values close to zero
             self.residual_moments = hk.nets.MLP([*self.params['residual_moments']['hidden_layers'], 3],
                                                 activation = getattr(jnp, _act_fn) if hasattr(jnp, _act_fn) else getattr(jax.nn, _act_fn),
                                                 w_init=hk.initializers.RandomUniform(-0.001, 0.001),
@@ -392,24 +414,49 @@ class SDERotorModel(ControlledSDE):
         # Add ground effect here if a NN is used
 
     def prior_diffusion(self, x, u, extra_args=None):
-        # Set the prior to a constant noise as defined in the yaml file
-        return jnp.array(self.params['noise_prior_params'])
+        """ Compute the prior diffusion term.
+            As specified in the paper, this is the maximum diffusion outside of the training dataset space coverage                
+        """
+        # assert len(self.params['prior_diffusion']) == x.shape[0], "The prior diffusion must be specified for each state dimension"
+        if self.params.get('control_augmented_state', False):
+            return jnp.concatenate((jnp.array(self.params['noise_prior_params']), jnp.zeros(u.shape[0])))
+        else:
+            return jnp.array(self.params['noise_prior_params'])
     
 
-    def compositional_drift(self, x, u, extra_args=None):
-        """Drift of the posterior dynamics
+    def compositional_drift(self, xval, uval, extra_args=None):
+        """Composition of the physics knowledge and the residual aerodynamics forces and moments
+            as well as the ground effect and the motor to thrust mapping
         """
-        # We need to build the residual terms and ext_thrust terms
+        if self.params.get('control_augmented_state', False):
+            x = xval[:13]
+            u = xval[13:]
+        else:
+            x = xval
+            u = uval
+
         # First we need to rotate the velocity vector in the body frame
         v_b = quat_rotatevectorinv(get_quat(x), get_vel(x))
 
         # Compute Fres and Mres and ground effect if it is taken into account
         Fres = self.compute_force_residual(x, v_b)
         Mres = self.compute_moment_residual(x, v_b)
+
+        # COmpute the ground effect if it is taken into account
         ge_effect = self.ground_effect(x)
 
         # Now we can compute the drift
-        return self.vector_field(x, u, Fres, Mres, ge_effect)
+        xdot_no_aug = self.vector_field(x, u, Fres, Mres, ge_effect)
+
+        # If the state is augmented, we need to add the derivative of the augmented states
+        if self.params.get('control_augmented_state', False):
+            xdot = jnp.concatenate((xdot_no_aug, uval))
+        else:
+            xdot = xdot_no_aug
+        
+        # Return the drift
+        return xdot
+
 
 
 ############# SET OF FUNCTIONS TO TRAIN THE MODEL #############
@@ -424,32 +471,43 @@ def load_trajectory(log_dir, outlier_cond=lambda d : d['z']>0.1, min_length=500,
             x (list): List of ndarray of shape (N, 13) containing the states
             u (list): List of ndarray of shape (N, 4) or (N, 6) containing the controls
     """
+
+    # Load the parse_ulog function here to avoid circular imports and dependency issues
     from sde4mbrlExamples.rotor_uav.utils import parse_ulog
     log_dir = os.path.expanduser(log_dir)
-    # Load the data from the ULog
+
+    # Load the data from the ULog, This return a list of chunks of dictionary trajectories
     log_data = parse_ulog(log_dir, outlier_cond=outlier_cond, min_length=min_length, mavg_dict=mavg_dict)
 
     # Ordered state names
     name_states = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'qw', 'qx', 'qy', 'qz', 'wx', 'wy', 'wz']
-    name_controls = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6']
+    name_controls = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6'] # The trajectory might contain only 4 motors, that is fine
 
     # Extract the states and controls
     x = [ np.stack([_log_data[_name] for _name in name_states], axis=1) for _log_data in log_data]
+    
     # Build the control action ndarray
     u = [ np.stack([_log_data[_name] for _name in name_controls if _name in _log_data], axis=1) for _log_data in log_data]
+    
     # Return the data
     return (x, u)
 
 def main_generate_trajectories(cfg_yaml_dir):
-    """ Generate and save trajectories fron the configuration file cfg_yaml.
-        When splitting, only the longest trajectory is taken
+    """ Create the training and testing dataset from a configuration file
+        - Essentially the configuration file has the following structure:
+            - vehicle_dir: Directory where the full training [ This assume that a folder data exists in this directory]
+            - outfile: Name of the output file, where the dataset will be stored as a pickle file
+            - train_trajectory: List of trajectory names to be used for training
+            - test_trajectory: List of trajectory names to be used for testing
+            - criteria: Criteria for parsing the trajectories based on minmax conditions
         Args:
             cfg_yaml_dir (str): Directory of the configuration file
     """
     cfg_yaml = load_yaml(cfg_yaml_dir)
     vehicle_dir = os.path.expanduser(cfg_yaml['vehicle_dir']) + '/my_data/' + cfg_yaml['outfile'] + '.pkl'
 
-    # Condition for the outliers
+    # Condition for parsing and processing the data
+    # Typically, we most of the time want to keep the data where the altitude is above a certain threshold
     def _cond_fun(d):
         """ Parsing data criteritrain_trajectorya function """
         res = None
@@ -462,8 +520,11 @@ def main_generate_trajectories(cfg_yaml_dir):
         return res
     
     # Check if a dictionary with moving average parameters are given
+    # If not, no moving average
+    # The moving average when present are mostly applied to the controls because they are noisy
     mavg_dict = cfg_yaml.get('mavg_dict', {})
 
+    # Load the training trajectories
     train_traj_list = []
     print('Loading train trajectories')
     for _data_path in tqdm(cfg_yaml['train_trajectory'], leave=False):
@@ -472,6 +533,7 @@ def main_generate_trajectories(cfg_yaml_dir):
         for _xtraj, _utraj in zip(xlist, ulist):
             train_traj_list.append((np.array(_xtraj), np.array(_utraj)))
 
+    # Load the testing trajectories
     test_traj_list = []
     print('Loading test trajectories')
     for _data_path in tqdm(cfg_yaml['test_trajectory'], leave=False):
@@ -486,18 +548,31 @@ def main_generate_trajectories(cfg_yaml_dir):
         pickle.dump({'train': train_traj_list, 'test': test_traj_list}, f)
 
 
-def load_predictor_function(learned_params_dir, prior_dist=False, nonoise=False, modified_params ={}, return_control=False, return_time_steps=False):
-    """ Create a function to sample from the prior distribution or
-        to sample from the posterior distribution
+def load_predictor_function(learned_params_dir, prior_dist=False, nonoise=False, modified_params ={}, 
+                            return_control=False, return_time_steps=False):
+    """ Create a function to sample from the learned SDE
         Args:
             learned_params_dir (str): Directory where the learned parameters are stored
-            prior_dist (bool): If True, the function will sample from the prior distribution
-            nonoise (bool): If True, the function will return a function without diffusion term
-            modified_params (dict): Dictionary of parameters to modify
+            prior_dist (bool): If True, the model is an ODE without the neural network residual terms (Solution of System ID)
+            nonoise (bool): If True, the diffusion term is removed
+            modified_params (dict): Dictionary of parameters of the model that should be modified
         Returns:
-            function: Function that can be used to sample from the prior or posterior distribution
+            (if return_control is False and return_time_steps is False)
+            function: lambda x, u, rng : [num_samples, horizon+1, state]
+            OR
+            (if return_control is True and return_time_steps is False)
+            function: lambda x, u, rng : [num_samples, horizon+1, num_state], [num_samples, horizon, num_control]
+            OR
+            (if return_control is False and return_time_steps is True)
+            function: lambda x, u, rng : [num_samples, horizon+1, num_state]
+            array: array of size [horizon+1]
+            OR
+            (if return_control is True and return_time_steps is True)
+            function: lambda x, u, rng : [num_samples, horizon+1, num_state], [num_samples, horizon, num_control]
+            array: array of size [horizon+1]
     """
-    # Load the pickle file
+
+    # Load the pickle file containing the learned parameters
     with open(os.path.expanduser(learned_params_dir), 'rb') as f:
         learned_params = pickle.load(f)
 
@@ -506,12 +581,18 @@ def load_predictor_function(learned_params_dir, prior_dist=False, nonoise=False,
 
     # SDE learned parameters -> All information are saved using numpy array to facilicate portability
     # of jax accross different devices
+    # Here, we transform the numpy array into jax array to jit the model
     _sde_learned = apply_fn_to_allleaf(jnp.array, np.ndarray, learned_params['sde'])
 
     # Update the parameters with a user-supplied dctionary of parameters
     params_model = update_params(_model_params, modified_params)
 
-    # If prior distribution, set the diffusion to zero
+    if 'control_augmented_state' in params_model and params_model['control_augmented_state']:
+        print ("Control augmented state is enabled")
+        params_model['n_x'] += params_model['n_u']
+        params_model['n_y'] += params_model['n_u']
+
+    # If prior distribution, remove the residual forces and moments, the aero drag effect, and the diffusion term
     if prior_dist:
         params_model.pop('residual_forces', None)
         params_model.pop('residual_moments', None)
@@ -520,18 +601,22 @@ def load_predictor_function(learned_params_dir, prior_dist=False, nonoise=False,
         # Remove the learned density function
         params_model.pop('diffusion_density_nn', None)
 
-    # If no_noise
-    if nonoise:
+    # If noise is disabled
+    if nonoise or prior_dist:
         params_model['noise_prior_params'] = [0] * len(params_model['noise_prior_params'])
     
     # Compute the timestep of the model the extract the time evolution starting t0 = 0
     time_steps = compute_timesteps(params_model)
     time_evol = np.array([0] + jnp.cumsum(time_steps).tolist())
 
-    # Create the model
+    # Create the sampling model
     _prior_params, m_sampling = create_sampling_fn(params_model, sde_constr=SDERotorModel)
 
+    # If prior params is enabled, use the output of create_sampling_fn
+    # otherwise, use the loaded parameters
     _sde_learned = _prior_params if prior_dist else _sde_learned
+
+    # Return the function or time evolution
     if not return_time_steps:
         return lambda *x : m_sampling(_sde_learned, *x)[1] if not return_control else m_sampling(_sde_learned, *x)[1:]
     else:
@@ -540,11 +625,15 @@ def load_predictor_function(learned_params_dir, prior_dist=False, nonoise=False,
 
 
 def load_mpc_solver(mpc_config_dir, modified_params={}, nominal_model=False):
-    """ Create an MPC solver that can be used at each time step for control
+    """ Create and return a function that integrates the dynamics as well as a cost function for MPC
         Args:
-            mpc_config_dir (str): Directory where the MPC configuration file is stored
-            modified_params (dict): Dictionary of parameters to modify
-            nominal_model (bool): If True, the MPC solver will use the nominal model
+            mpc_config_dir (str): Directory where the MPC configuration file is stored (typically, horizon, dt, etc.)
+            modified_params (dict): Dictionary of parameters of the model that should be modified (e.g, integration method, etc.)
+            nominal_model (bool): If True, the MPC solver will use the nominal model (diffusion-less model)
+        Returns:
+            tuple: (the SDE parameters, the MPC solver params) as dictionaries
+            function : 
+
     """
     # Load the yaml configuration file
     _mpc_params = load_yaml(mpc_config_dir)
@@ -567,23 +656,92 @@ def load_mpc_solver(mpc_config_dir, modified_params={}, nominal_model=False):
     # Update the parameters with a user-supplied dctionary of parameters
     params_model = update_params(_model_params, modified_params)
 
+    # New addition -> Transform dynamics in control affine form
+    # Not used in the papaer experiments
+    if 'use_rate_control' in mpc_params and mpc_params['use_rate_control']:
+        print ("Control augmented state is enabled")
+        params_model['control_augmented_state'] = True
+        params_model['n_x'] += params_model['n_u']
+        params_model['n_y'] += params_model['n_u']
+
     # Update other parameters provided in the yaml file
     if 'model_update' in mpc_params:
         params_model = update_params(params_model, mpc_params['model_update'])
+        
+    sys_id = _mpc_params.get('use_sysId_model', False)
+    if sys_id:
+        # Remove the learned density function
+        print ("Using the system identification model")
+        params_model.pop('diffusion_density_nn', None)
+        params_model['noise_prior_params'] = [0] * len(params_model['noise_prior_params'])
+        params_model.pop('residual_forces', None)
+        params_model.pop('residual_moments', None)
+        params_model.pop('aero_drag_effect', None)
     
     if nominal_model:
         # Remove the learned density function
         params_model.pop('diffusion_density_nn', None)
         params_model['noise_prior_params'] = [0] * len(params_model['noise_prior_params'])
 
-    # Create the function that defines the cost of MPC and integration
-    # This function modifies params_model
-    _, _multi_cost_sampling, vmapped_prox, _, construct_opt_params = create_online_cost_sampling_fn(params_model, mpc_params, sde_constr=SDERotorModel)
-
+    # Create the function that defines the cost of MPC through integration of the SDE dynamics
+    _model_params , _multi_cost_sampling, vmapped_prox, _, construct_opt_params = create_online_cost_sampling_fn(params_model, mpc_params, sde_constr=SDERotorModel)
+    _sde_learned =  _model_params if sys_id else _sde_learned
     # multi_cost_sampling =  lambda *x : _multi_cost_sampling(_sde_learned, *x)
     # Set the actual model params
     _mpc_params['model'] = params_model
     return (_sde_learned, _mpc_params), _multi_cost_sampling, vmapped_prox, construct_opt_params
+
+
+# def analyse_control_inputs_changes(dataset, data_step_size=0.01):
+#     """ Some analysis for control limitations
+#     """
+#     u_seq = [ _data['u'] for _data in dataset] # Each trajectories may be of different length
+#     info_data = {}
+#     for _u in u_seq:
+#         # Each _u is a list of ndarray of shape (N, 4) or (N, 6), where N is the length of the trajectory
+#         # Get min and max of each control
+#         _u_min = np.min(_u, axis=0)
+#         _u_max = np.max(_u, axis=0)
+#         # Now let's check the rate of changes of the control inputs
+#         _u_diff = _u[1:] - _u[:-1]
+#         _u_diff_dt = _u_diff / data_step_size
+#         _u_diff_dt_max = np.max(np.abs(_u_diff_dt), axis=0)
+#         _actual_u_dt_max = np.max(_u_diff, axis=0)
+#         _actual_u_dt_min = np.min(_u_diff_dt, axis=0)
+#         _actual_udiff_max = np.max(_u_diff, axis=0)
+#         _actual_udiff_min = np.min(_u_diff, axis=0)
+#         _udiff_max = np.max(np.abs(_u_diff), axis=0)
+#         curr_info_data = {
+#             'u_min': _u_min,
+#             'u_max': _u_max,
+#             'u_diff_dt_max': _u_diff_dt_max,
+#             'actual_u_dt_max': _actual_u_dt_max,
+#             'actual_u_dt_min': _actual_u_dt_min,
+#             'actual_udiff_max': _actual_udiff_max,
+#             'actual_udiff_min': _actual_udiff_min,
+#             'udiff_max': _udiff_max
+#         }
+#         # Update the info data
+#         for _k, _v in curr_info_data.items():
+#             if 'min' in _k:
+#                 if _k in info_data:
+#                     info_data[_k] = [float(b) for b in np.minimum(info_data[_k], _v)]
+#                 else:
+#                     info_data[_k] = [float(b) for b in _v]
+#             elif 'max' in _k:
+#                 if _k in info_data:
+#                     info_data[_k] = [float(b) for b in np.maximum(info_data[_k], _v)]
+#                 else:
+#                     info_data[_k] = [float(b) for b in _v]
+#             else:
+#                 raise ValueError('Unknown key {}'.format(_k))
+            
+#     # Pretty print the dictionary
+#     for _k, _v in info_data.items():
+#         # print(type(_v), type(_v[0]))
+#         print('{}: {}'.format(_k, _v))
+
+#     return info_data
 
 
 def main_train_sde(yaml_cfg_file, output_file=None):
@@ -607,10 +765,17 @@ def main_train_sde(yaml_cfg_file, output_file=None):
 
 
     if 'data_state_scaling' in cfg_train['model']:
-        cfg_train['model']['state_scaling'] = list(np.max(np.abs(np.concatenate([x['y'] for x in full_data])), axis=0))
-        # Set the quaternion scaling to 1
-        cfg_train['model']['state_scaling'][6:10] = 1.0
+        cfg_train['model']['state_scaling'] = np.max(np.abs(np.concatenate([x['y'] for x in full_data])), axis=0)
+        cfg_train['sde_loss']['obs_weights'] = [_v for _v in cfg_train['model']['state_scaling']]
         print('State scaling is set to {}'.format(cfg_train['model']['state_scaling']))
+        # Set the quaternion scaling to 1 because we do not want to scale the quaternion quantities
+        cfg_train['model']['state_scaling'][6:10] = 1.0
+        cfg_train['model']['state_scaling'] = list(cfg_train['model']['state_scaling'])
+    
+    if 'updated_obs_weights' in cfg_train['sde_loss']:
+        for _i, _v in cfg_train['sde_loss']['updated_obs_weights'].items():
+            cfg_train['sde_loss']['obs_weights'][_i] *= _v
+    print('Observation weights are set to {}'.format(cfg_train['sde_loss']['obs_weights']))
 
     # Check if the control input match the model
     assert cfg_train['model']['n_u'] == full_data[0]['u'].shape[-1], 'The control input dimension does not match the model'
@@ -633,6 +798,14 @@ def main_train_sde(yaml_cfg_file, output_file=None):
 
     output_file = vehicle_dir + '/my_models/' + output_file
 
+    # # Analyse the control inputs\
+    # train_inputs_rate = analyse_control_inputs_changes(full_data, cfg_train['sde_loss']['data_stepsize'])
+    # test_inputs_rate = analyse_control_inputs_changes(test_data, cfg_train['sde_loss']['data_stepsize'])
+    # cfg_train['model']['data_input_rate'] = {'train': train_inputs_rate, 'test': test_inputs_rate}
+    # # Save data input rate to a yaml file
+    # with open(vehicle_dir + '/data_input_rate.yaml', 'w') as f:
+    #     yaml.dump(cfg_train['model']['data_input_rate'], f)
+
     # Train the model
     train_model(cfg_train, full_data, test_data, output_file, SDERotorModel)
 
@@ -641,18 +814,24 @@ if __name__ == '__main__':
 
     import argparse
     from tqdm.auto import tqdm
+    import yaml
 
     # Argument parser
+    #
     parser = argparse.ArgumentParser(description='Train the SDE model')
-    parser.add_argument('--fun', type=str, default='gen_traj', help='Path to the yaml training configuration file')
+    parser.add_argument('--train', default=False, action='store_true', help='Train the models')
+    parser.add_argument('--trajs', default=False, action='store_true', help='Generate the trajectories')
     parser.add_argument('--cfg', type=str, default='iris_sitl/data_generation.yaml', help='Path to the yaml training configuration file')
     parser.add_argument('--out', type=str, default='iris_sitl', help='Path to the output file')
+    # Create an action for train and gen_traj
     # Parse the arguments
     args = parser.parse_args()
+
     # Check the function type
-    if args.fun == 'gen_traj':
+    if args.trajs:
         # Generate the trajectories
         main_generate_trajectories(args.cfg)
-    elif args.fun == 'train_sde':
+
+    elif args.train:
         # Call the main function
         main_train_sde(args.cfg, args.out)
