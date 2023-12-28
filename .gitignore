@@ -153,3 +153,9 @@ sde4mbrlExamples/rotor_uav/iris_sitl/my_models/*.txt
 sde4mbrlExamples/rotor_uav/iris_sitl/my_models/*.yaml
 
 sde4mbrlExamples/cartpole/runs/*
+
+*.ulg
+*.png
+*.csv
+*.tex
+*.pdf
