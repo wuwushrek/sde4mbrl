@@ -12,7 +12,7 @@ time horizons, even when trained on small datasets that cover limited regions of
 
 By installing the package as below, you also install dependencies such as Jax, dm-haiku, optax, skrl, etc...
 ```
-python -m pip install -e .
+python -m pip install .
 ```
 
 If JAX needs to run on the GPU, please follow the instructions on [Jax website](https://github.com/google/jax)

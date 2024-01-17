@@ -13,7 +13,7 @@ setup(
    license="GNU 3.0",
    long_description=long_description,
    author='Franck Djeumou and Cyrus Neary',
-   author_email='fdjeumou@utexas.edu and cneary@utexas.edu'
+   author_email='fdjeumou@utexas.edu and cneary@utexas.edu',
    url="https://github.com/wuwushrek/sde4mbrl.git",
    packages= find_packages(),
    # TODO: Clean up the dependencies
